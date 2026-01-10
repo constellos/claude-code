@@ -42,7 +42,7 @@ import { getProcessesOnPorts, formatProcessInfo } from '../shared/hooks/utils/pr
 import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
 import { existsSync, readFileSync, readdirSync, statSync, mkdirSync, openSync } from 'fs';
-import { join } from 'path';
+import { join, dirname, basename } from 'path';
 import { platform } from 'os';
 
 const execAsync = promisify(exec);
@@ -1081,24 +1081,60 @@ async function determineSupabaseInstance(
 
 /**
  * Clean up orphaned Supabase sessions
- * Finds sessions marked as running but whose worktree no longer exists
- * OR sessions from different Claude sessions, stops their containers,
- * and marks them as stopped.
- * Also detects running containers without matching session files.
+ * Finds sessions marked as running but whose worktree no longer exists,
+ * stops their containers, and marks them as stopped.
+ *
+ * IMPORTANT: This function scans ALL worktrees (not just current) to avoid
+ * killing containers from other active sessions. A different session ID is
+ * NOT a reason to kill - multi-session support requires multiple sessions
+ * to coexist.
+ *
+ * Only truly orphaned containers are cleaned up:
+ * - Session file exists but worktree path no longer exists
+ * - Running containers with no matching session file anywhere
  */
 async function cleanupOrphanedSessions(
   cwd: string,
   messages: string[],
-  currentSessionId: string
+  _currentSessionId: string
 ): Promise<void> {
-  const logsDir = join(cwd, '.claude', 'logs');
   let orphansFound = 0;
 
-  // Build a set of valid running project IDs from session files
+  // Build a set of valid running project IDs from ALL worktree session files
+  // This is critical for multi-session support - we must not kill containers
+  // from other active sessions running in sibling worktrees
   const validRunningProjectIds = new Set<string>();
   const sessionProjectIds = new Map<string, string>(); // projectId -> sessionPath
 
-  if (existsSync(logsDir)) {
+  // Find all worktrees to scan for session files
+  // Structure: /home/ben/.claude-worktrees/<repo-name>/<worktree-name>/.claude/logs/
+  const worktreesToScan: string[] = [];
+
+  // Always include current worktree
+  worktreesToScan.push(cwd);
+
+  // Try to find sibling worktrees (same repo, different worktree names)
+  try {
+    // If we're in a worktree, go up to find siblings
+    // e.g., /home/ben/.claude-worktrees/nodes-md/claude-foo/ -> /home/ben/.claude-worktrees/nodes-md/
+    const parentDir = dirname(cwd);
+    if (parentDir.includes('.claude-worktrees')) {
+      const siblings = readdirSync(parentDir, { withFileTypes: true })
+        .filter((d) => d.isDirectory() && d.name !== basename(cwd))
+        .map((d) => join(parentDir, d.name));
+      worktreesToScan.push(...siblings);
+    }
+  } catch {
+    // Couldn't enumerate siblings, just use current worktree
+  }
+
+  // Phase 1: Scan all worktrees for session files
+  for (const worktreePath of worktreesToScan) {
+    const logsDir = join(worktreePath, '.claude', 'logs');
+    if (!existsSync(logsDir)) {
+      continue;
+    }
+
     let files: string[];
     try {
       files = readdirSync(logsDir).filter((f) => f.startsWith('supabase-session-'));
@@ -1116,16 +1152,13 @@ async function cleanupOrphanedSessions(
           sessionProjectIds.set(session.worktreeProjectId, sessionPath);
         }
 
-        // Check if session should be cleaned up:
-        // 1. Worktree path no longer exists (orphaned)
-        // 2. Session is from a different Claude session (stale)
+        // Only clean up if worktree path no longer exists (truly orphaned)
+        // DO NOT clean up just because it's a different session ID!
         const isOrphanedPath = session.worktreePath && !existsSync(session.worktreePath);
-        const isDifferentSession = session.sessionId && session.sessionId !== currentSessionId;
 
-        if (session.running && (isOrphanedPath || isDifferentSession)) {
+        if (session.running && isOrphanedPath) {
           orphansFound++;
-          const reason = isOrphanedPath ? 'orphaned path' : 'previous session';
-          messages.push(`🧹 Cleaning ${reason}: ${session.worktreeProjectId || session.worktreeId}`);
+          messages.push(`🧹 Cleaning orphaned path: ${session.worktreeProjectId || session.worktreeId}`);
 
           // Try to stop containers with this project ID
           if (session.worktreeProjectId) {
@@ -1148,8 +1181,9 @@ async function cleanupOrphanedSessions(
           const { writeFileSync } = await import('fs');
           writeFileSync(sessionPath, JSON.stringify(session, null, 2));
           messages.push(`  ✓ Marked session as stopped`);
-        } else if (session.running && session.sessionId === currentSessionId) {
-          // This is a valid running session for the current Claude session
+        } else if (session.running) {
+          // This is a valid running session (from any Claude session)
+          // Add to valid set so we don't kill it in phase 2
           if (session.worktreeProjectId) {
             validRunningProjectIds.add(session.worktreeProjectId);
           }
@@ -1160,7 +1194,7 @@ async function cleanupOrphanedSessions(
     }
   }
 
-  // Phase 2: Detect running containers without matching session files
+  // Phase 2: Detect running containers without matching session files ANYWHERE
   // This catches containers orphaned due to session file corruption/deletion
   try {
     const result = await execAsync('docker ps --format "{{.Names}}" --filter "name=supabase_"', {
@@ -1184,26 +1218,26 @@ async function cleanupOrphanedSessions(
 
       // Find containers without matching valid session files
       for (const projectId of runningProjectIds) {
-        // Skip if it's a valid running session
+        // Skip if it's a valid running session (from ANY worktree)
         if (validRunningProjectIds.has(projectId)) {
           continue;
         }
 
-        // Skip if there's a session file marked as running (already handled above)
+        // Skip if there's a session file marked as running
         const sessionPath = sessionProjectIds.get(projectId);
         if (sessionPath) {
           try {
             const content = readFileSync(sessionPath, 'utf-8');
             const session = JSON.parse(content) as WorktreeSupabaseSession;
             if (session.running) {
-              continue; // Already handled in phase 1
+              continue; // Session exists and is marked running, don't kill
             }
           } catch {
             // Session file is corrupted, treat as orphan
           }
         }
 
-        // This is an orphaned container without a valid session
+        // This is an orphaned container without a valid session file
         orphansFound++;
         messages.push(`🧹 Cleaning orphaned container: ${projectId}`);
 

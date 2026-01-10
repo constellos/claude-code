@@ -77,6 +77,7 @@ async function handler(input: SessionEndInput): Promise<SessionEndHookOutput> {
   let cleanedConfig = false;
 
   // 1. Stop and delete Supabase containers (if session has project ID)
+  let cleanedVolumes = false;
   if (session?.worktreeProjectId) {
     try {
       // Stop containers
@@ -90,6 +91,21 @@ async function handler(input: SessionEndInput): Promise<SessionEndHookOutput> {
         { cwd: input.cwd, timeout: 30000 }
       );
       cleanedContainers = true;
+    } catch {
+      // Best effort - don't fail if cleanup fails
+    }
+
+    // 1b. Delete associated Docker volumes to free disk space
+    try {
+      await execCommand(
+        `docker volume ls -q --filter "name=supabase_db_${session.worktreeProjectId}" | xargs -r docker volume rm`,
+        { cwd: input.cwd, timeout: 30000 }
+      );
+      await execCommand(
+        `docker volume ls -q --filter "name=supabase_storage_${session.worktreeProjectId}" | xargs -r docker volume rm`,
+        { cwd: input.cwd, timeout: 30000 }
+      );
+      cleanedVolumes = true;
     } catch {
       // Best effort - don't fail if cleanup fails
     }
@@ -146,6 +162,7 @@ async function handler(input: SessionEndInput): Promise<SessionEndHookOutput> {
     success: true,
     cleaned: session?.worktreeProjectId,
     cleanedContainers,
+    cleanedVolumes,
     cleanedPorts,
     cleanedConfig,
     reason: input.reason,
