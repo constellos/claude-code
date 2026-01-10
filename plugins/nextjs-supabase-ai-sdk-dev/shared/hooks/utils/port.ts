@@ -95,8 +95,8 @@ export async function findAvailablePort(
 /**
  * Kill process(es) using a specific port
  *
- * Uses lsof to find the process ID and kills it. This is useful for freeing up
- * ports that are held by stale dev servers from previous sessions.
+ * Uses lsof to find the process ID and kills it, with fallback to ss if lsof fails.
+ * This is useful for freeing up ports that are held by stale dev servers from previous sessions.
  *
  * @param port - Port number to free up
  * @returns Promise that resolves to true if process was killed, false otherwise
@@ -113,9 +113,28 @@ export async function findAvailablePort(
  */
 export async function killProcessOnPort(port: number): Promise<boolean> {
   try {
-    // Use lsof to find processes listening on the port
-    const { stdout } = await execAsync(`lsof -ti tcp:${port}`, { timeout: 5000 });
-    const pids = stdout.trim().split('\n').filter(Boolean);
+    let pids: string[] = [];
+
+    // Try lsof first (preferred, more portable)
+    try {
+      const { stdout } = await execAsync(`lsof -ti tcp:${port}`, { timeout: 5000 });
+      pids = stdout.trim().split('\n').filter(Boolean);
+    } catch {
+      // lsof failed or not available, will try ss fallback
+    }
+
+    // Fallback to ss if lsof found nothing
+    if (pids.length === 0) {
+      try {
+        const { stdout } = await execAsync(
+          `ss -tlnp | grep ':${port}\\b' | sed -n 's/.*pid=\\([0-9]*\\).*/\\1/p'`,
+          { timeout: 5000 }
+        );
+        pids = stdout.trim().split('\n').filter(Boolean);
+      } catch {
+        // ss also failed or not available
+      }
+    }
 
     if (pids.length === 0) {
       return false;
@@ -134,7 +153,6 @@ export async function killProcessOnPort(port: number): Promise<boolean> {
     await new Promise((resolve) => setTimeout(resolve, 500));
     return await isPortAvailable(port);
   } catch {
-    // lsof returned non-zero (no process found) or other error
     return false;
   }
 }
