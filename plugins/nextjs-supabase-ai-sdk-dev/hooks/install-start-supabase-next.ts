@@ -16,7 +16,7 @@ import { runHook } from '../shared/hooks/utils/io.js';
 import { detectPackageManager } from '../shared/hooks/utils/package-manager.js';
 import { isPortAvailable, findAvailablePort, killProcessOnPort, findAvailablePortAt10Increments } from '../shared/hooks/utils/port.js';
 import { getWranglerDevPort } from '../shared/hooks/utils/toml.js';
-import { distributeEnvVars, mergeWorkspaceEnvVars, validateEnvVars, detectSupabaseUsage } from '../shared/hooks/utils/env-sync.js';
+import { distributeEnvVars, mergeWorkspaceEnvVars, validateEnvVars, detectSupabaseUsage, hasSupabaseInMonorepo } from '../shared/hooks/utils/env-sync.js';
 import { detectWorktree, type WorktreeInfo } from '../shared/hooks/utils/worktree.js';
 import {
   PORT_INCREMENT,
@@ -313,10 +313,16 @@ async function distributeAllEnvVars(
     }
   }
 
+  // Check if any package in the monorepo uses Supabase (for internal package detection)
+  const monorepoHasSupabase = hasSupabaseInMonorepo(cwd);
+
   // Distribute to ALL workspaces
   for (const workspace of workspaces) {
     const workspacePath = join(cwd, workspace);
-    const usesSupabase = detectSupabaseUsage(workspacePath);
+    // Check if this workspace uses Supabase directly, OR if it's an app that might
+    // depend on internal packages that wrap Supabase
+    const usesSupabase = detectSupabaseUsage(workspacePath) ||
+                         (workspace.startsWith('apps/') && monorepoHasSupabase);
 
     // Only include Supabase vars if workspace actually uses them
     const varsToDistribute = usesSupabase

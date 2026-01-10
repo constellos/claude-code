@@ -13,7 +13,7 @@
  * @module env-sync
  */
 
-import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 
 /**
@@ -23,6 +23,10 @@ export type WorkspaceFramework = 'nextjs' | 'vite' | 'cloudflare' | 'unknown';
 
 /**
  * Detect if a workspace uses Supabase by checking dependencies
+ *
+ * Checks for:
+ * 1. Direct Supabase SDK usage (@supabase/supabase-js, @supabase/ssr)
+ * 2. Internal packages that wrap Supabase (@scope/supabase, *supabase*)
  *
  * @param workspacePath - Path to the workspace directory
  * @returns True if the workspace uses Supabase
@@ -40,10 +44,68 @@ export function detectSupabaseUsage(workspacePath: string): boolean {
       ...pkg.devDependencies,
     };
 
-    return '@supabase/supabase-js' in allDeps || '@supabase/ssr' in allDeps;
+    // Check for direct Supabase SDK usage
+    if ('@supabase/supabase-js' in allDeps || '@supabase/ssr' in allDeps) {
+      return true;
+    }
+
+    // Check for internal packages that wrap Supabase
+    // Pattern: @{scope}/supabase, @{scope}/*supabase*, *supabase*
+    for (const dep of Object.keys(allDeps)) {
+      // Match patterns like @nodes-md/supabase, @repo/supabase, my-supabase-wrapper
+      if (
+        dep.endsWith('/supabase') || // @scope/supabase
+        /^@[^/]+\/.*supabase.*$/.test(dep) // @scope/*supabase*
+      ) {
+        return true;
+      }
+    }
+
+    return false;
   } catch {
     return false;
   }
+}
+
+/**
+ * Check if ANY workspace in the monorepo uses Supabase directly
+ *
+ * This is a fallback for monorepos where apps depend on internal packages
+ * that wrap Supabase. If any package in packages/ has @supabase dependencies,
+ * we assume all apps may need the env vars.
+ *
+ * @param cwd - Root directory of the monorepo
+ * @returns True if any package uses Supabase
+ */
+export function hasSupabaseInMonorepo(cwd: string): boolean {
+  const packagesDir = join(cwd, 'packages');
+  if (!existsSync(packagesDir)) {
+    return false;
+  }
+
+  try {
+    const entries = readdirSync(packagesDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+
+      const pkgPath = join(packagesDir, entry.name, 'package.json');
+      if (!existsSync(pkgPath)) continue;
+
+      try {
+        const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+        const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
+        if ('@supabase/supabase-js' in allDeps || '@supabase/ssr' in allDeps) {
+          return true;
+        }
+      } catch {
+        continue;
+      }
+    }
+  } catch {
+    return false;
+  }
+
+  return false;
 }
 
 /**
