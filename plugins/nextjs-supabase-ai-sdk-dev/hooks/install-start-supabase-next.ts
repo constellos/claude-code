@@ -431,8 +431,9 @@ interface WorkspacePortInfo {
 /**
  * Detect ports from all workspace package.json files
  * For Turborepo projects, reads each workspace's dev script to find configured ports
+ * For Cloudflare workers, also reads wrangler.toml/jsonc for port configuration
  */
-function detectWorkspacePorts(cwd: string, workspaces: string[]): WorkspacePortInfo[] {
+async function detectWorkspacePorts(cwd: string, workspaces: string[]): Promise<WorkspacePortInfo[]> {
   const portInfos: WorkspacePortInfo[] = [];
 
   for (const workspace of workspaces) {
@@ -443,7 +444,16 @@ function detectWorkspacePorts(cwd: string, workspaces: string[]): WorkspacePortI
     const wsProjectType = detectWorkspaceProjectType(workspacePath);
 
     // Extract configured port from dev script
-    const configuredPort = extractPortFromDevScript(packageJsonPath);
+    let configuredPort = extractPortFromDevScript(packageJsonPath);
+
+    // For Cloudflare workers, also check wrangler.toml if no port in dev script
+    if (configuredPort === null && wsProjectType === 'cloudflare') {
+      const wranglerTomlPath = join(workspacePath, 'wrangler.toml');
+      const wranglerJsoncPath = join(workspacePath, 'wrangler.jsonc');
+      configuredPort = await getWranglerDevPort(wranglerTomlPath) ||
+                       await getWranglerDevPort(wranglerJsoncPath) ||
+                       null;
+    }
 
     // Get default port for this project type
     const defaultPort = getDefaultPort(wsProjectType);
@@ -938,39 +948,86 @@ async function determineSupabaseInstance(
   // Check for existing worktree session
   const existingSession = await loadWorktreeSupabaseSession(cwd, worktreeInfo.worktreeId);
 
-  if (existingSession && existingSession.running) {
-    messages.push(`✓ Found existing session (slot ${existingSession.slot})`);
-    return {
-      slot: existingSession.slot,
-      supabasePorts: existingSession.supabasePorts,
-      devServerPorts: existingSession.devServerPorts,
-      worktreeInfo,
-      needsNewInstance: false,
-      existingSession,
-    };
+  // Only reuse session if it's from the SAME Claude session (same session_id)
+  // This prevents port conflicts when multiple sessions run in the same worktree
+  if (existingSession && existingSession.running && existingSession.sessionId) {
+    // Check if the containers are actually running before reusing
+    try {
+      const result = await execAsync(
+        `docker ps -q --filter "name=supabase_.*_${existingSession.worktreeProjectId}"`,
+        { timeout: 5000 }
+      );
+      if (result.stdout?.trim()) {
+        // Containers exist - reuse this session
+        messages.push(`✓ Found existing session (slot ${existingSession.slot})`);
+        return {
+          slot: existingSession.slot,
+          supabasePorts: existingSession.supabasePorts,
+          devServerPorts: existingSession.devServerPorts,
+          worktreeInfo,
+          needsNewInstance: false,
+          existingSession,
+        };
+      }
+      // Session file exists but containers are gone - proceed to allocate new
+      messages.push(`ℹ️  Previous session containers not running, allocating new instance`);
+    } catch {
+      // Docker check failed, try to reuse session anyway
+      messages.push(`✓ Found existing session (slot ${existingSession.slot})`);
+      return {
+        slot: existingSession.slot,
+        supabasePorts: existingSession.supabasePorts,
+        devServerPorts: existingSession.devServerPorts,
+        worktreeInfo,
+        needsNewInstance: false,
+        existingSession,
+      };
+    }
   }
 
   // Check port usage on default ports
   const defaultUsage = await checkSupabasePortUsage();
 
   if (defaultUsage.allRunning) {
-    // All default ports in use - need new instance for worktree
-    if (worktreeInfo.isWorktree) {
-      messages.push('ℹ️  Default Supabase ports in use, allocating worktree instance...');
+    // All default ports in use - need new instance
+    // Use availability-based allocation: find next available container name AND ports
+    messages.push('ℹ️  Default Supabase ports in use, allocating new instance...');
 
-      // Show what's using the ports (best effort)
-      const processInfos = await getProcessesOnPorts(defaultUsage.runningPorts.slice(0, 3));
-      for (const info of processInfos) {
-        if (info.found) {
-          messages.push(`  Port ${info.port}: ${formatProcessInfo(info)}`);
+    // Show what's using the ports (best effort)
+    const processInfos = await getProcessesOnPorts(defaultUsage.runningPorts.slice(0, 3));
+    for (const info of processInfos) {
+      if (info.found) {
+        messages.push(`  Port ${info.port}: ${formatProcessInfo(info)}`);
+      }
+    }
+
+    // Get base project ID for container name check
+    const configPath = getSupabaseConfigPath(cwd);
+    const baseProjectId = getOriginalProjectId(configPath, worktreeInfo.worktreeId) || 'supabase';
+
+    // Find next available container name based on what's actually running
+    const { slot: containerSlot } = await findAvailableContainerName(baseProjectId);
+
+    // Also verify ports are available for this slot
+    let slot = containerSlot;
+    if (slot > 0) {
+      const slotUsage = await checkSupabasePortUsage(calculatePortSet(slot));
+      if (slotUsage.allRunning || slotUsage.someRunning) {
+        // Container name available but ports aren't - find next slot with both
+        const nextSlot = await findAvailableSlot();
+        if (nextSlot !== null) {
+          slot = nextSlot;
         }
       }
+    }
 
-      // Find next available slot
-      const slot = await findAvailableSlot();
-      if (slot === null) {
-        messages.push('⚠️ No available port slots (all 25 slots in use)');
-        // Fall back to default ports
+    if (slot === 0 && defaultUsage.allRunning) {
+      // Slot 0 is taken and no container name found - find by port availability
+      const nextSlot = await findAvailableSlot();
+      if (nextSlot !== null) {
+        slot = nextSlot;
+      } else {
+        messages.push('⚠️ No available slots (all in use)');
         return {
           slot: 0,
           supabasePorts: calculatePortSet(0),
@@ -980,28 +1037,17 @@ async function determineSupabaseInstance(
           existingSession: null,
         };
       }
-
-      messages.push(`  Allocated slot ${slot}`);
-      return {
-        slot,
-        supabasePorts: calculatePortSet(slot),
-        devServerPorts: calculateDevServerPorts(slot),
-        worktreeInfo,
-        needsNewInstance: true,
-        existingSession: null,
-      };
-    } else {
-      // Main repo with Supabase running - use existing
-      messages.push('✓ Using existing Supabase instance on default ports');
-      return {
-        slot: 0,
-        supabasePorts: calculatePortSet(0),
-        devServerPorts: calculateDevServerPorts(0),
-        worktreeInfo,
-        needsNewInstance: false,
-        existingSession: null,
-      };
     }
+
+    messages.push(`  Allocated slot ${slot}`);
+    return {
+      slot,
+      supabasePorts: calculatePortSet(slot),
+      devServerPorts: calculateDevServerPorts(slot),
+      worktreeInfo,
+      needsNewInstance: true,
+      existingSession: null,
+    };
   } else if (defaultUsage.someRunning) {
     // Partial - stale processes, clean up
     messages.push('⚠️ Stale Supabase processes detected, cleaning up...');
@@ -1180,6 +1226,49 @@ async function cleanupOrphanedSessions(
 
   if (orphansFound > 0) {
     messages.push(`✓ Cleaned up ${orphansFound} orphaned session(s)/container(s)`);
+  }
+}
+
+/**
+ * Find the next available Supabase container name based on what's actually running in Docker
+ * Returns base name if available, otherwise base-1, base-2, etc.
+ */
+async function findAvailableContainerName(baseProjectId: string): Promise<{ name: string; slot: number }> {
+  try {
+    const result = await execAsync('docker ps --format "{{.Names}}" --filter "name=supabase_"', {
+      timeout: 10000,
+    });
+
+    const runningContainers = result.stdout?.split('\n').filter(Boolean) || [];
+
+    // Extract all running project IDs
+    const runningProjectIds = new Set<string>();
+    for (const name of runningContainers) {
+      const parts = name.split('_');
+      if (parts.length >= 3) {
+        const projectId = parts.slice(2).join('_');
+        runningProjectIds.add(projectId);
+      }
+    }
+
+    // Try base name first (e.g., "constellos")
+    if (!runningProjectIds.has(baseProjectId)) {
+      return { name: baseProjectId, slot: 0 };
+    }
+
+    // Find next available suffix: constellos-1, constellos-2, etc.
+    for (let i = 1; i < 10; i++) {
+      const candidate = `${baseProjectId}-${i}`;
+      if (!runningProjectIds.has(candidate)) {
+        return { name: candidate, slot: i };
+      }
+    }
+
+    // All slots taken, fall back to slot 0 (will likely fail but let user know)
+    return { name: baseProjectId, slot: 0 };
+  } catch {
+    // Docker not available - assume base is available
+    return { name: baseProjectId, slot: 0 };
   }
 }
 
@@ -1603,7 +1692,7 @@ async function handler(input: SessionStartInput): Promise<SessionStartHookOutput
         const workspaces = detectTurborepoWorkspaces(input.cwd);
         if (workspaces && workspaces.length > 0) {
           // Detect ports for all workspaces
-          const workspacePorts = detectWorkspacePorts(input.cwd, workspaces);
+          const workspacePorts = await detectWorkspacePorts(input.cwd, workspaces);
 
           // Apply worktree port offsets if in a non-default slot
           if (worktreeSlot > 0) {
@@ -1777,7 +1866,7 @@ async function handler(input: SessionStartInput): Promise<SessionStartHookOutput
         if (projectType === 'turborepo') {
           const workspaces = detectTurborepoWorkspaces(input.cwd);
           if (workspaces && workspaces.length > 0) {
-            const workspacePorts = detectWorkspacePorts(input.cwd, workspaces);
+            const workspacePorts = await detectWorkspacePorts(input.cwd, workspaces);
 
             // Apply worktree port offsets for health checks
             if (worktreeSlot > 0) {

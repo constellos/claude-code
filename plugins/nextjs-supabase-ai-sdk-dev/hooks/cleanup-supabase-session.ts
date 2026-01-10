@@ -68,66 +68,86 @@ async function handler(input: SessionEndInput): Promise<SessionEndHookOutput> {
   // Load session state
   const session = await loadWorktreeSupabaseSession(input.cwd, worktreeInfo.worktreeId);
 
-  // Only cleanup if:
-  // 1. Session exists and is running
-  // 2. Session was started by this Claude session (matching sessionId)
-  if (!session?.running) {
-    await logger.logOutput({ success: true, reason: 'no_running_session' });
-    return {};
-  }
+  // Best-effort cleanup - try to clean up resources regardless of session ownership
+  // This ensures we don't leave orphaned containers/processes when sessions end unexpectedly
 
-  if (session.sessionId && session.sessionId !== input.session_id) {
-    await logger.logOutput({
-      success: true,
-      reason: 'different_session',
-      current: input.session_id,
-      session_owner: session.sessionId,
-    });
-    return {};
-  }
+  // Track what we cleaned
+  let cleanedContainers = false;
+  let cleanedPorts = false;
+  let cleanedConfig = false;
 
-  // Stop and delete Supabase containers using docker directly
-  // This is faster and more reliable than `supabase stop` during exit
-  if (session.worktreeProjectId) {
-    // Stop containers
-    await execCommand(
-      `docker ps -q --filter "name=supabase_.*_${session.worktreeProjectId}" | xargs -r docker stop`,
-      { cwd: input.cwd, timeout: 30000 }
-    );
-    // Delete stopped containers (docker rm)
-    await execCommand(
-      `docker ps -aq --filter "name=supabase_.*_${session.worktreeProjectId}" | xargs -r docker rm`,
-      { cwd: input.cwd, timeout: 30000 }
-    );
-  }
-
-  // Kill dev server processes by port
-  if (session.devServerPorts) {
-    const ports = [
-      session.devServerPorts.nextjs,
-      session.devServerPorts.vite,
-      session.devServerPorts.cloudflare,
-    ].filter((p): p is number => typeof p === 'number' && p > 0);
-
-    if (ports.length > 0) {
-      await killProcessesOnPorts(ports);
+  // 1. Stop and delete Supabase containers (if session has project ID)
+  if (session?.worktreeProjectId) {
+    try {
+      // Stop containers
+      await execCommand(
+        `docker ps -q --filter "name=supabase_.*_${session.worktreeProjectId}" | xargs -r docker stop`,
+        { cwd: input.cwd, timeout: 30000 }
+      );
+      // Delete stopped containers (docker rm)
+      await execCommand(
+        `docker ps -aq --filter "name=supabase_.*_${session.worktreeProjectId}" | xargs -r docker rm`,
+        { cwd: input.cwd, timeout: 30000 }
+      );
+      cleanedContainers = true;
+    } catch {
+      // Best effort - don't fail if cleanup fails
     }
   }
 
-  // Restore config.toml from backup (for worktree sessions)
-  if (session.configBackupPath && existsSync(session.configBackupPath)) {
-    const configPath = getSupabaseConfigPath(input.cwd);
-    restoreSupabaseConfig(configPath, `.backup-${worktreeInfo.worktreeId}`);
+  // 2. Kill dev server processes by port (if session has port info)
+  if (session?.devServerPorts) {
+    try {
+      const ports = [
+        session.devServerPorts.nextjs,
+        session.devServerPorts.vite,
+        session.devServerPorts.cloudflare,
+      ].filter((p): p is number => typeof p === 'number' && p > 0);
+
+      if (ports.length > 0) {
+        await killProcessesOnPorts(ports);
+        cleanedPorts = true;
+      }
+    } catch {
+      // Best effort - don't fail if cleanup fails
+    }
   }
 
-  // Mark session as stopped
-  await updateWorktreeSupabaseSession(input.cwd, worktreeInfo.worktreeId, {
-    running: false,
-  });
+  // 3. Also try to kill common dev server ports (3100-3102, 8787) as fallback
+  try {
+    await killProcessesOnPorts([3100, 3101, 3102, 8787]);
+  } catch {
+    // Best effort
+  }
+
+  // 4. Restore config.toml from backup (for worktree sessions)
+  if (session?.configBackupPath && existsSync(session.configBackupPath)) {
+    try {
+      const configPath = getSupabaseConfigPath(input.cwd);
+      restoreSupabaseConfig(configPath, `.backup-${worktreeInfo.worktreeId}`);
+      cleanedConfig = true;
+    } catch {
+      // Best effort
+    }
+  }
+
+  // 5. Mark session as stopped (if session exists)
+  if (session) {
+    try {
+      await updateWorktreeSupabaseSession(input.cwd, worktreeInfo.worktreeId, {
+        running: false,
+      });
+    } catch {
+      // Best effort
+    }
+  }
 
   await logger.logOutput({
     success: true,
-    cleaned: session.worktreeProjectId,
+    cleaned: session?.worktreeProjectId,
+    cleanedContainers,
+    cleanedPorts,
+    cleanedConfig,
     reason: input.reason,
   });
 
