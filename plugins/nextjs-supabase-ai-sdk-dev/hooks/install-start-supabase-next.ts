@@ -16,7 +16,7 @@ import { runHook } from '../shared/hooks/utils/io.js';
 import { detectPackageManager } from '../shared/hooks/utils/package-manager.js';
 import { isPortAvailable, findAvailablePort, killProcessOnPort, findAvailablePortAt10Increments } from '../shared/hooks/utils/port.js';
 import { getWranglerDevPort } from '../shared/hooks/utils/toml.js';
-import { distributeEnvVars, mergeWorkspaceEnvVars, validateEnvVars, detectSupabaseUsage, hasSupabaseInMonorepo } from '../shared/hooks/utils/env-sync.js';
+import { distributeEnvVars, mergeWorkspaceEnvVars, validateEnvVars, detectSupabaseUsage, hasSupabaseInMonorepo, generateAppUrls, detectWorkspaceFramework, type DevServerPorts, type WorkspaceInfo } from '../shared/hooks/utils/env-sync.js';
 import { detectWorktree, type WorktreeInfo } from '../shared/hooks/utils/worktree.js';
 import {
   PORT_INCREMENT,
@@ -41,7 +41,7 @@ import {
 import { getProcessesOnPorts, formatProcessInfo } from '../shared/hooks/utils/process-info.js';
 import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
-import { existsSync, readFileSync, readdirSync, statSync, mkdirSync, openSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, statSync, mkdirSync, openSync, writeFileSync } from 'fs';
 import { join, dirname, basename } from 'path';
 import { platform } from 'os';
 
@@ -287,16 +287,19 @@ async function exportSupabaseEnvVars(
 /**
  * Distribute environment variables to all workspaces in a turborepo
  * Collects Supabase vars and Vercel vars, then distributes to all workspaces
+ * Also generates per-app URL env vars for cross-app communication
  *
  * @param cwd - Root directory of the project
  * @param workspaces - Array of workspace paths relative to cwd
  * @param supabaseVars - Optional Supabase variables (from Supabase CLI)
+ * @param devServerPorts - Optional dev server ports for URL generation
  * @returns Array of status messages
  */
 async function distributeAllEnvVars(
   cwd: string,
   workspaces: string[],
-  supabaseVars?: Record<string, string>
+  supabaseVars?: Record<string, string>,
+  devServerPorts?: DevServerPorts
 ): Promise<string[]> {
   const messages: string[] = [];
 
@@ -316,6 +319,20 @@ async function distributeAllEnvVars(
   // Check if any package in the monorepo uses Supabase (for internal package detection)
   const monorepoHasSupabase = hasSupabaseInMonorepo(cwd);
 
+  // Generate per-app URL env vars if ports are provided
+  let appUrlsByWorkspace: Map<string, Record<string, string>> | null = null;
+  if (devServerPorts) {
+    // Build workspace info for URL generation
+    const workspaceInfos: WorkspaceInfo[] = workspaces.map(ws => {
+      const wsPath = join(cwd, ws);
+      const name = ws.split('/').pop() || ws;
+      const framework = detectWorkspaceFramework(wsPath);
+      return { path: ws, name, framework };
+    });
+
+    appUrlsByWorkspace = generateAppUrls(workspaceInfos, devServerPorts);
+  }
+
   // Distribute to ALL workspaces
   for (const workspace of workspaces) {
     const workspacePath = join(cwd, workspace);
@@ -324,10 +341,29 @@ async function distributeAllEnvVars(
     const usesSupabase = detectSupabaseUsage(workspacePath) ||
                          (workspace.startsWith('apps/') && monorepoHasSupabase);
 
+    // Merge app URL vars into vercel vars for this workspace
+    const appUrls = appUrlsByWorkspace?.get(workspace) || {};
+    const mergedVercelVars = { ...vercelVars, ...appUrls };
+
     // Only include Supabase vars if workspace actually uses them
     const varsToDistribute = usesSupabase
-      ? { supabaseVars: supabaseVars || {}, vercelVars }
-      : { supabaseVars: {}, vercelVars };
+      ? { supabaseVars: supabaseVars || {}, vercelVars: mergedVercelVars }
+      : { supabaseVars: {}, vercelVars: mergedVercelVars };
+
+    // Build alwaysOverwriteKeys list including URL vars
+    const alwaysOverwriteKeys = [
+      // URL vars should always be updated to reflect current ports
+      ...Object.keys(appUrls),
+    ];
+    if (usesSupabase) {
+      alwaysOverwriteKeys.push(
+        'NEXT_PUBLIC_SUPABASE_URL',
+        'NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY',
+        'SUPABASE_SECRET_KEY',
+        'VITE_SUPABASE_URL',
+        'VITE_SUPABASE_PUBLISHABLE_KEY',
+      );
+    }
 
     const result = await distributeEnvVars(
       workspacePath,
@@ -335,22 +371,22 @@ async function distributeAllEnvVars(
       {
         createIfMissing: true,
         preserveExisting: true,
-        alwaysOverwriteKeys: usesSupabase ? [
-          'NEXT_PUBLIC_SUPABASE_URL',
-          'NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY',
-          'SUPABASE_SECRET_KEY',
-          'VITE_SUPABASE_URL',
-          'VITE_SUPABASE_PUBLISHABLE_KEY',
-        ] : []
+        alwaysOverwriteKeys,
       }
     );
 
     if (result.nextjs || result.vite) {
-      const varsWritten = usesSupabase ? 'Supabase + Vercel' : 'Vercel';
+      const hasUrls = Object.keys(appUrls).length > 0;
+      const varsWritten = usesSupabase
+        ? (hasUrls ? 'Supabase + Vercel + URLs' : 'Supabase + Vercel')
+        : (hasUrls ? 'Vercel + URLs' : 'Vercel');
       messages.push(`✓ Environment variables (${varsWritten}) written to ${workspace}/.env.local`);
     }
     if (result.cloudflare) {
-      const varsWritten = usesSupabase ? 'Supabase + Vercel' : 'Vercel';
+      const hasUrls = Object.keys(appUrls).length > 0;
+      const varsWritten = usesSupabase
+        ? (hasUrls ? 'Supabase + Vercel + URLs' : 'Supabase + Vercel')
+        : (hasUrls ? 'Vercel + URLs' : 'Vercel');
       messages.push(`✓ Environment variables (${varsWritten}) written to ${workspace}/dev.vars`);
     }
   }
@@ -1385,6 +1421,34 @@ async function startWorktreeSupabase(
   messages.push(`  API: http://localhost:${supabasePorts.api}`);
   messages.push(`  Studio: http://localhost:${supabasePorts.studio}`);
 
+  // Save exact container IDs for scoped cleanup in SessionEnd hook
+  // This prevents accidentally deleting containers from other sessions
+  try {
+    const containersResult = await execAsync(
+      `docker ps -q --filter "label=com.supabase.cli.project=${worktreeProjectId}"`,
+      { timeout: 10000 }
+    );
+    const containerIds = containersResult.stdout?.split('\n').filter(Boolean) || [];
+
+    if (containerIds.length > 0) {
+      const dockerConfigPath = join(cwd, '.claude', 'logs', 'docker-containers.json');
+      const dockerConfig = {
+        projectId: worktreeProjectId,
+        containerIds,
+        volumeNames: [
+          `supabase_db_${worktreeProjectId}`,
+          `supabase_storage_${worktreeProjectId}`,
+        ],
+        savedAt: new Date().toISOString(),
+      };
+      writeFileSync(dockerConfigPath, JSON.stringify(dockerConfig, null, 2));
+      messages.push(`  ✓ Saved ${containerIds.length} container IDs for cleanup`);
+    }
+  } catch {
+    // Best effort - don't fail if we can't save container IDs
+    messages.push('  ⚠️ Could not save container IDs (cleanup may be less precise)');
+  }
+
   // Save session state with project IDs
   const session: WorktreeSupabaseSession = {
     worktreeId: worktreeInfo.worktreeId,
@@ -1642,6 +1706,10 @@ async function handler(input: SessionStartInput): Promise<SessionStartHookOutput
     // ========== Step 5: Export Environment Variables ==========
     const projectType = detectProjectType(input.cwd);
 
+    // Pre-calculate dev server ports for URL generation
+    // This ensures env vars include correct URLs before servers start
+    const preCalculatedPorts = await findAvailableDevServerPorts();
+
     if (projectType === 'turborepo') {
       const workspaces = detectTurborepoWorkspaces(input.cwd);
       if (workspaces && workspaces.length > 0) {
@@ -1658,8 +1726,8 @@ async function handler(input: SessionStartInput): Promise<SessionStartHookOutput
           }
         }
 
-        // Distribute all env vars (Supabase + Vercel) to all workspaces
-        const envMessages = await distributeAllEnvVars(input.cwd, workspaces, supabaseVars);
+        // Distribute all env vars (Supabase + Vercel + App URLs) to all workspaces
+        const envMessages = await distributeAllEnvVars(input.cwd, workspaces, supabaseVars, preCalculatedPorts);
         messages.push(...envMessages);
       }
     } else if (supabaseRunning) {
@@ -1746,12 +1814,16 @@ async function handler(input: SessionStartInput): Promise<SessionStartHookOutput
             .join(', ');
           messages.push(`  Workspaces: ${portSummary}`);
 
-          // Kill any stale processes on workspace ports BEFORE starting dev server
-          const portsToCheck = workspacePorts
-            .map(p => p.configuredPort || p.defaultPort)
-            .filter((p): p is number => p !== null && p !== undefined);
+          // Check if pre-calculated ports are available (these are the ports we'll actually use)
+          // Only kill stale processes on the ACTUAL ports we're going to use, not configured ports
+          // This prevents killing dev servers from other sessions that are using different ports
+          const actualPortsToUse = [
+            preCalculatedPorts.nextjs,
+            preCalculatedPorts.vite,
+            preCalculatedPorts.cloudflare,
+          ].filter((p): p is number => typeof p === 'number' && p > 0);
 
-          for (const port of portsToCheck) {
+          for (const port of actualPortsToUse) {
             const available = await isPortAvailable(port);
             if (!available) {
               messages.push(`  ⚠️ Port ${port} in use, killing stale process...`);
@@ -1762,6 +1834,11 @@ async function handler(input: SessionStartInput): Promise<SessionStartHookOutput
                 messages.push(`  ⚠️ Could not free port ${port} - server may fail to start`);
               }
             }
+          }
+
+          // Show which ports will be used vs configured
+          if (preCalculatedPorts.nextjs !== 3000 || preCalculatedPorts.vite !== 5173 || preCalculatedPorts.cloudflare !== 8787) {
+            messages.push(`  Using ports: Next.js=${preCalculatedPorts.nextjs}, Vite=${preCalculatedPorts.vite}, Cloudflare=${preCalculatedPorts.cloudflare}`);
           }
 
           // Check for missing env passthrough vars
@@ -1852,9 +1929,9 @@ async function handler(input: SessionStartInput): Promise<SessionStartHookOutput
 
       messages.push(`Starting dev server: ${devCommand}`);
 
-      // Find available ports by scanning at +10 increments
-      // This checks actual port availability instead of slot-based offsets
-      const availablePorts = await findAvailableDevServerPorts();
+      // Use pre-calculated ports (same as used for env var URLs)
+      // This ensures consistency between env vars and actual server ports
+      const availablePorts = preCalculatedPorts;
       const devServerEnvVars: Record<string, string> = {};
 
       if (projectType === 'turborepo') {

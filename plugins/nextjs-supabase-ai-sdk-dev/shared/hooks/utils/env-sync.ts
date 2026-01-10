@@ -110,12 +110,13 @@ export function hasSupabaseInMonorepo(cwd: string): boolean {
 
 /**
  * Detect the framework type of a workspace based on config files
+ * Falls back to checking package.json dependencies if no config files found
  *
  * @param workspacePath - Path to the workspace directory
  * @returns Detected framework type
  */
 export function detectWorkspaceFramework(workspacePath: string): WorkspaceFramework {
-  // Check for Next.js
+  // Check for Next.js config files first
   if (
     existsSync(join(workspacePath, 'next.config.js')) ||
     existsSync(join(workspacePath, 'next.config.mjs')) ||
@@ -124,7 +125,7 @@ export function detectWorkspaceFramework(workspacePath: string): WorkspaceFramew
     return 'nextjs';
   }
 
-  // Check for Vite
+  // Check for Vite config files
   if (
     existsSync(join(workspacePath, 'vite.config.ts')) ||
     existsSync(join(workspacePath, 'vite.config.js')) ||
@@ -139,6 +140,33 @@ export function detectWorkspaceFramework(workspacePath: string): WorkspaceFramew
     existsSync(join(workspacePath, 'wrangler.jsonc'))
   ) {
     return 'cloudflare';
+  }
+
+  // Fallback: Check package.json dependencies for framework detection
+  // This catches cases where config files are missing but deps indicate the framework
+  const packageJsonPath = join(workspacePath, 'package.json');
+  if (existsSync(packageJsonPath)) {
+    try {
+      const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
+      const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
+
+      // Check for Next.js dependency
+      if ('next' in allDeps) {
+        return 'nextjs';
+      }
+
+      // Check for Vite dependency
+      if ('vite' in allDeps) {
+        return 'vite';
+      }
+
+      // Check for Cloudflare/Wrangler dependency
+      if ('wrangler' in allDeps || '@cloudflare/workers-types' in allDeps) {
+        return 'cloudflare';
+      }
+    } catch {
+      // Ignore parse errors
+    }
   }
 
   return 'unknown';
@@ -553,6 +581,131 @@ export async function distributeEnvVars(
   }
 
   return { nextjs: nextjsWritten, vite: viteWritten, cloudflare: cloudflareWritten };
+}
+
+/**
+ * Dev server port configuration for URL generation
+ */
+export interface DevServerPorts {
+  nextjs: number;
+  vite: number;
+  cloudflare: number;
+}
+
+/**
+ * Workspace info for URL generation
+ */
+export interface WorkspaceInfo {
+  /** Workspace path relative to cwd (e.g., 'apps/web') */
+  path: string;
+  /** Workspace name (e.g., 'web') */
+  name: string;
+  /** Detected framework type */
+  framework: WorkspaceFramework;
+}
+
+/**
+ * Generate per-app URL environment variables for all workspaces
+ *
+ * Creates self-reference URLs (NEXT_PUBLIC_APP_URL, APP_URL) and cross-app
+ * reference URLs (NEXT_PUBLIC_WEB_URL, NEXT_PUBLIC_MCP_URL, etc.) so apps
+ * can communicate with each other during local development.
+ *
+ * @param workspaces - Array of workspace info objects
+ * @param ports - Dev server port configuration
+ * @returns Map of workspace path to URL env vars for that workspace
+ *
+ * @example
+ * ```typescript
+ * import { generateAppUrls } from './env-sync.js';
+ *
+ * const urlVars = generateAppUrls(
+ *   [
+ *     { path: 'apps/app', name: 'app', framework: 'nextjs' },
+ *     { path: 'apps/web', name: 'web', framework: 'nextjs' },
+ *     { path: 'apps/mcp', name: 'mcp', framework: 'cloudflare' },
+ *   ],
+ *   { nextjs: 3100, vite: 5173, cloudflare: 3102 }
+ * );
+ *
+ * // Result for apps/app:
+ * // {
+ * //   NEXT_PUBLIC_APP_URL: 'http://localhost:3100',
+ * //   NEXT_PUBLIC_WEB_URL: 'http://localhost:3101',
+ * //   NEXT_PUBLIC_MCP_URL: 'http://localhost:3102',
+ * // }
+ * ```
+ */
+export function generateAppUrls(
+  workspaces: WorkspaceInfo[],
+  ports: DevServerPorts
+): Map<string, Record<string, string>> {
+  const urlsByWorkspace = new Map<string, Record<string, string>>();
+
+  // First, calculate the actual port for each workspace
+  // For multiple apps of the same type, increment port by 1
+  const portsByType: Record<WorkspaceFramework, number> = {
+    nextjs: ports.nextjs,
+    vite: ports.vite,
+    cloudflare: ports.cloudflare,
+    unknown: ports.nextjs,
+  };
+
+  const workspacePortMap = new Map<string, number>();
+  const usedPortsByType: Record<WorkspaceFramework, number[]> = {
+    nextjs: [],
+    vite: [],
+    cloudflare: [],
+    unknown: [],
+  };
+
+  // Assign ports to each workspace
+  for (const ws of workspaces) {
+    const basePort = portsByType[ws.framework];
+    const usedPorts = usedPortsByType[ws.framework];
+    const offset = usedPorts.length;
+    const port = basePort + offset;
+
+    workspacePortMap.set(ws.path, port);
+    usedPorts.push(port);
+  }
+
+  // Generate URL vars for each workspace
+  for (const ws of workspaces) {
+    const port = workspacePortMap.get(ws.path)!;
+    const url = `http://localhost:${port}`;
+    const vars: Record<string, string> = {};
+
+    // Self-reference URL
+    if (ws.framework === 'nextjs') {
+      vars['NEXT_PUBLIC_APP_URL'] = url;
+    } else if (ws.framework === 'vite') {
+      vars['VITE_APP_URL'] = url;
+    } else {
+      vars['APP_URL'] = url;
+    }
+
+    // Cross-app references (URLs to all other apps)
+    for (const otherWs of workspaces) {
+      if (otherWs.path === ws.path) continue;
+
+      const otherPort = workspacePortMap.get(otherWs.path)!;
+      const otherUrl = `http://localhost:${otherPort}`;
+      const otherNameUpper = otherWs.name.toUpperCase().replace(/-/g, '_');
+
+      if (ws.framework === 'nextjs') {
+        vars[`NEXT_PUBLIC_${otherNameUpper}_URL`] = otherUrl;
+      } else if (ws.framework === 'vite') {
+        vars[`VITE_${otherNameUpper}_URL`] = otherUrl;
+      } else {
+        vars[`${otherNameUpper}_URL`] = otherUrl;
+      }
+    }
+
+    urlsByWorkspace.set(ws.path, vars);
+  }
+
+  return urlsByWorkspace;
 }
 
 /**
