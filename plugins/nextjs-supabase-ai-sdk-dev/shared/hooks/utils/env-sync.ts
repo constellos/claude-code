@@ -648,7 +648,16 @@ export function generateAppUrls(
 ): Map<string, Record<string, string>> {
   const urlsByWorkspace = new Map<string, Record<string, string>>();
 
-  // First, calculate the actual port for each workspace
+  // Filter to only include actual app workspaces with dev servers
+  // Exclude npm packages (framework === 'unknown') which don't have dev servers
+  // This prevents generating URLs like NEXT_PUBLIC_SUPABASE_URL for packages/supabase
+  const appWorkspaces = workspaces.filter(ws =>
+    ws.framework === 'nextjs' ||
+    ws.framework === 'vite' ||
+    ws.framework === 'cloudflare'
+  );
+
+  // First, calculate the actual port for each app workspace
   // Use configuredPort if available, otherwise fall back to base + offset
   const portsByType: Record<WorkspaceFramework, number> = {
     nextjs: ports.nextjs,
@@ -665,9 +674,9 @@ export function generateAppUrls(
     unknown: [],
   };
 
-  // Assign ports to each workspace
+  // Assign ports to each app workspace
   // Priority: configuredPort > base port + offset
-  for (const ws of workspaces) {
+  for (const ws of appWorkspaces) {
     let port: number;
 
     if (ws.configuredPort !== null) {
@@ -685,8 +694,8 @@ export function generateAppUrls(
     usedPortsByType[ws.framework].push(port);
   }
 
-  // Generate URL vars for each workspace
-  for (const ws of workspaces) {
+  // Generate URL vars for each app workspace
+  for (const ws of appWorkspaces) {
     const port = workspacePortMap.get(ws.path)!;
     const url = `http://localhost:${port}`;
     const vars: Record<string, string> = {};
@@ -701,7 +710,7 @@ export function generateAppUrls(
     }
 
     // Cross-app references (URLs to all other apps)
-    for (const otherWs of workspaces) {
+    for (const otherWs of appWorkspaces) {
       if (otherWs.path === ws.path) continue;
 
       const otherPort = workspacePortMap.get(otherWs.path)!;
