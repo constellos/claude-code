@@ -405,20 +405,8 @@ export async function distributeEnvVars(
   // Prepare combined vars for frontend frameworks (Next.js or Vite)
   const frontendVars: Record<string, string> = {};
 
-  // Add Supabase vars with framework-specific prefix
-  if (vars.supabaseVars) {
-    for (const [key, value] of Object.entries(vars.supabaseVars)) {
-      if (key === 'SUPABASE_URL') {
-        frontendVars[`${publicPrefix}SUPABASE_URL`] = value;
-      } else if (key === 'SUPABASE_PUBLISHABLE_KEY') {
-        frontendVars[`${publicPrefix}SUPABASE_PUBLISHABLE_KEY`] = value;
-      } else if (key === 'SUPABASE_SECRET_KEY') {
-        frontendVars['SUPABASE_SECRET_KEY'] = value; // No prefix for secret
-      }
-    }
-  }
-
-  // Add Vercel vars - transform prefix if needed for Vite
+  // Add Vercel vars FIRST - these may contain old values from existing env files
+  // Supabase vars will be applied last to ensure correct values always win
   if (vars.vercelVars) {
     for (const [key, value] of Object.entries(vars.vercelVars)) {
       if (framework === 'vite' && key.startsWith('NEXT_PUBLIC_')) {
@@ -439,6 +427,20 @@ export async function distributeEnvVars(
         frontendVars[`VITE_${unprefixed}`] = value;
       } else {
         frontendVars[key] = value;
+      }
+    }
+  }
+
+  // Add Supabase vars LAST with framework-specific prefix
+  // Applied last so fresh values from Supabase CLI always override stale env file values
+  if (vars.supabaseVars) {
+    for (const [key, value] of Object.entries(vars.supabaseVars)) {
+      if (key === 'SUPABASE_URL') {
+        frontendVars[`${publicPrefix}SUPABASE_URL`] = value;
+      } else if (key === 'SUPABASE_PUBLISHABLE_KEY') {
+        frontendVars[`${publicPrefix}SUPABASE_PUBLISHABLE_KEY`] = value;
+      } else if (key === 'SUPABASE_SECRET_KEY') {
+        frontendVars['SUPABASE_SECRET_KEY'] = value; // No prefix for secret
       }
     }
   }
@@ -492,17 +494,8 @@ export async function distributeEnvVars(
   // Prepare vars for Cloudflare (unprefixed)
   const cloudflareVars: Record<string, string> = {};
 
-  // Add Supabase vars without NEXT_PUBLIC_ prefix
-  if (vars.supabaseVars) {
-    Object.assign(cloudflareVars, vars.supabaseVars);
-  }
-
-  // Add Cloudflare-specific vars
-  if (vars.cloudflareVars) {
-    Object.assign(cloudflareVars, vars.cloudflareVars);
-  }
-
-  // Add Vercel vars (strip NEXT_PUBLIC_ prefix for Cloudflare)
+  // Add Vercel vars FIRST (strip NEXT_PUBLIC_ prefix for Cloudflare)
+  // These may contain old values from existing env files
   if (vars.vercelVars) {
     for (const [key, value] of Object.entries(vars.vercelVars)) {
       if (key.startsWith('NEXT_PUBLIC_')) {
@@ -512,6 +505,17 @@ export async function distributeEnvVars(
         cloudflareVars[key] = value;
       }
     }
+  }
+
+  // Add Cloudflare-specific vars
+  if (vars.cloudflareVars) {
+    Object.assign(cloudflareVars, vars.cloudflareVars);
+  }
+
+  // Add Supabase vars LAST without NEXT_PUBLIC_ prefix
+  // Applied last so fresh values from Supabase CLI always override stale env file values
+  if (vars.supabaseVars) {
+    Object.assign(cloudflareVars, vars.supabaseVars);
   }
 
   // Write to dev.vars (only if wrangler.toml/wrangler.jsonc exists)
@@ -644,7 +648,16 @@ export function generateAppUrls(
 ): Map<string, Record<string, string>> {
   const urlsByWorkspace = new Map<string, Record<string, string>>();
 
-  // First, calculate the actual port for each workspace
+  // Filter to only include actual app workspaces with dev servers
+  // Exclude npm packages (framework === 'unknown') which don't have dev servers
+  // This prevents generating URLs like NEXT_PUBLIC_SUPABASE_URL for packages/supabase
+  const appWorkspaces = workspaces.filter(ws =>
+    ws.framework === 'nextjs' ||
+    ws.framework === 'vite' ||
+    ws.framework === 'cloudflare'
+  );
+
+  // First, calculate the actual port for each app workspace
   // Use configuredPort if available, otherwise fall back to base + offset
   const portsByType: Record<WorkspaceFramework, number> = {
     nextjs: ports.nextjs,
@@ -661,9 +674,9 @@ export function generateAppUrls(
     unknown: [],
   };
 
-  // Assign ports to each workspace
+  // Assign ports to each app workspace
   // Priority: configuredPort > base port + offset
-  for (const ws of workspaces) {
+  for (const ws of appWorkspaces) {
     let port: number;
 
     if (ws.configuredPort !== null) {
@@ -681,8 +694,8 @@ export function generateAppUrls(
     usedPortsByType[ws.framework].push(port);
   }
 
-  // Generate URL vars for each workspace
-  for (const ws of workspaces) {
+  // Generate URL vars for each app workspace
+  for (const ws of appWorkspaces) {
     const port = workspacePortMap.get(ws.path)!;
     const url = `http://localhost:${port}`;
     const vars: Record<string, string> = {};
@@ -697,7 +710,7 @@ export function generateAppUrls(
     }
 
     // Cross-app references (URLs to all other apps)
-    for (const otherWs of workspaces) {
+    for (const otherWs of appWorkspaces) {
       if (otherWs.path === ws.path) continue;
 
       const otherPort = workspacePortMap.get(otherWs.path)!;
