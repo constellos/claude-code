@@ -322,11 +322,13 @@ async function distributeAllEnvVars(
   let appUrlsByWorkspace: Map<string, Record<string, string>> | null = null;
   if (devServerPorts) {
     // Build workspace info for URL generation
+    // Extract configured ports from package.json dev scripts
     const workspaceInfos: WorkspaceInfo[] = workspaces.map(ws => {
       const wsPath = join(cwd, ws);
       const name = ws.split('/').pop() || ws;
       const framework = detectWorkspaceFramework(wsPath);
-      return { path: ws, name, framework };
+      const configuredPort = extractPortFromDevScript(join(wsPath, 'package.json'));
+      return { path: ws, name, framework, configuredPort };
     });
 
     appUrlsByWorkspace = generateAppUrls(workspaceInfos, devServerPorts);
@@ -361,6 +363,9 @@ async function distributeAllEnvVars(
         'SUPABASE_SECRET_KEY',
         'VITE_SUPABASE_URL',
         'VITE_SUPABASE_PUBLISHABLE_KEY',
+        // Cloudflare dev.vars uses unprefixed keys
+        'SUPABASE_URL',
+        'SUPABASE_PUBLISHABLE_KEY',
       );
     }
 
