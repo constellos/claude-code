@@ -602,6 +602,8 @@ export interface WorkspaceInfo {
   name: string;
   /** Detected framework type */
   framework: WorkspaceFramework;
+  /** Port configured in package.json dev script (--port flag), or null if not configured */
+  configuredPort: number | null;
 }
 
 /**
@@ -643,7 +645,7 @@ export function generateAppUrls(
   const urlsByWorkspace = new Map<string, Record<string, string>>();
 
   // First, calculate the actual port for each workspace
-  // For multiple apps of the same type, increment port by 1
+  // Use configuredPort if available, otherwise fall back to base + offset
   const portsByType: Record<WorkspaceFramework, number> = {
     nextjs: ports.nextjs,
     vite: ports.vite,
@@ -660,14 +662,23 @@ export function generateAppUrls(
   };
 
   // Assign ports to each workspace
+  // Priority: configuredPort > base port + offset
   for (const ws of workspaces) {
-    const basePort = portsByType[ws.framework];
-    const usedPorts = usedPortsByType[ws.framework];
-    const offset = usedPorts.length;
-    const port = basePort + offset;
+    let port: number;
+
+    if (ws.configuredPort !== null) {
+      // Use the port configured in package.json dev script
+      port = ws.configuredPort;
+    } else {
+      // Fall back to base port + offset for workspaces without configured port
+      const basePort = portsByType[ws.framework];
+      const usedPorts = usedPortsByType[ws.framework];
+      const offset = usedPorts.length;
+      port = basePort + offset;
+    }
 
     workspacePortMap.set(ws.path, port);
-    usedPorts.push(port);
+    usedPortsByType[ws.framework].push(port);
   }
 
   // Generate URL vars for each workspace
