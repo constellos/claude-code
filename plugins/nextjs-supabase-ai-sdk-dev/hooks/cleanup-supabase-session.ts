@@ -1,8 +1,8 @@
 /**
  * Supabase Session Cleanup Hook (SessionEnd)
  * SessionEnd hook that:
- * 1. Stops Supabase containers for the current session
- * 2. Restores config.toml from backup (for worktree sessions)
+ * 1. Stops Supabase containers for the current session (using --workdir for tmp configs)
+ * 2. Cleans up /tmp/supabase-{worktreeId} directory
  * 3. Marks session state as stopped
  *
  * This is the primary cleanup hook that runs when the user exits the session
@@ -19,10 +19,7 @@ import {
   loadWorktreeSupabaseSession,
   updateWorktreeSupabaseSession,
 } from '../shared/hooks/utils/session-state.js';
-import {
-  restoreSupabaseConfig,
-  getSupabaseConfigPath,
-} from '../shared/hooks/utils/supabase-ports.js';
+import { cleanupTmpSupabaseDir } from '../shared/hooks/utils/supabase-tmp-config.js';
 import { killProcessesOnPorts } from '../shared/hooks/utils/port.js';
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -86,15 +83,32 @@ async function handler(input: SessionEndInput): Promise<SessionEndHookOutput> {
   let cleanedContainers = false;
   let cleanedPorts = false;
   let cleanedConfig = false;
+  let cleanedVolumes = false;
+
+  // 0. Try supabase stop --workdir first (cleanest approach for tmp directory sessions)
+  if (session?.tmpConfigDir && existsSync(session.tmpConfigDir)) {
+    try {
+      const stopResult = await execCommand(
+        `supabase stop --workdir ${session.tmpConfigDir}`,
+        { cwd: input.cwd, timeout: 60000 }
+      );
+      if (stopResult.success) {
+        cleanedContainers = true;
+        cleanedVolumes = true;
+      }
+    } catch {
+      // Fall through to docker-based cleanup
+    }
+  }
 
   // 1. Stop and delete Supabase containers using exact IDs from docker-containers.json
   // This prevents accidentally deleting containers from other sessions
-  let cleanedVolumes = false;
+  // Skip if supabase stop already succeeded
   const dockerConfigPath = join(input.cwd, '.claude', 'logs', 'docker-containers.json');
 
   // Try to use exact container IDs first (more precise, prevents cross-session deletion)
   let usedExactIds = false;
-  if (existsSync(dockerConfigPath)) {
+  if (!cleanedContainers && existsSync(dockerConfigPath)) {
     try {
       const configContent = readFileSync(dockerConfigPath, 'utf-8');
       const dockerConfig: DockerContainerConfig = JSON.parse(configContent);
@@ -123,7 +137,8 @@ async function handler(input: SessionEndInput): Promise<SessionEndHookOutput> {
 
   // Fallback: use filter-based cleanup if exact IDs not available
   // This is less precise but ensures cleanup still happens
-  if (!usedExactIds && session?.worktreeProjectId) {
+  // Skip if supabase stop or exact IDs already succeeded
+  if (!cleanedContainers && !usedExactIds && session?.worktreeProjectId) {
     try {
       // Use exact name matching by listing containers and filtering in shell
       // The filter pattern matches containers ending with the exact project ID
@@ -183,11 +198,10 @@ async function handler(input: SessionEndInput): Promise<SessionEndHookOutput> {
     // Best effort
   }
 
-  // 4. Restore config.toml from backup (for worktree sessions)
-  if (session?.configBackupPath && existsSync(session.configBackupPath)) {
+  // 4. Clean up tmp Supabase config directory (for worktree sessions)
+  if (session?.tmpConfigDir) {
     try {
-      const configPath = getSupabaseConfigPath(input.cwd);
-      restoreSupabaseConfig(configPath, `.backup-${worktreeInfo.worktreeId}`);
+      cleanupTmpSupabaseDir(session.tmpConfigDir);
       cleanedConfig = true;
     } catch {
       // Best effort

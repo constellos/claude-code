@@ -332,7 +332,7 @@ export interface WorktreeSupabaseSession {
   devServerPorts: DevServerPortSet;
   /** ISO timestamp when instance was started */
   startedAt: string;
-  /** Path to config.toml backup file */
+  /** Path to config.toml backup file (deprecated - use tmpConfigDir) */
   configBackupPath: string;
   /** Whether instance is currently running */
   running: boolean;
@@ -342,6 +342,10 @@ export interface WorktreeSupabaseSession {
   worktreeProjectId: string;
   /** Claude session ID that owns this instance (for orphan detection) */
   sessionId?: string;
+  /** Path to temporary Supabase config directory (e.g., /tmp/supabase-abc12345) */
+  tmpConfigDir?: string;
+  /** Path to original supabase/ directory in project */
+  originalSupabaseDir?: string;
 }
 
 // ============================================================================
