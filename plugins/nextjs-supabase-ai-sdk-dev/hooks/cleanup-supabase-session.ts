@@ -26,7 +26,18 @@ import {
 import { killProcessesOnPorts } from '../shared/hooks/utils/port.js';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
+import { join } from 'path';
+
+/**
+ * Docker container config saved by SessionStart hook
+ */
+interface DockerContainerConfig {
+  projectId: string;
+  containerIds: string[];
+  volumeNames: string[];
+  savedAt: string;
+}
 
 const execAsync = promisify(exec);
 
@@ -76,18 +87,52 @@ async function handler(input: SessionEndInput): Promise<SessionEndHookOutput> {
   let cleanedPorts = false;
   let cleanedConfig = false;
 
-  // 1. Stop and delete Supabase containers (if session has project ID)
+  // 1. Stop and delete Supabase containers using exact IDs from docker-containers.json
+  // This prevents accidentally deleting containers from other sessions
   let cleanedVolumes = false;
-  if (session?.worktreeProjectId) {
+  const dockerConfigPath = join(input.cwd, '.claude', 'logs', 'docker-containers.json');
+
+  // Try to use exact container IDs first (more precise, prevents cross-session deletion)
+  let usedExactIds = false;
+  if (existsSync(dockerConfigPath)) {
     try {
-      // Stop containers
+      const configContent = readFileSync(dockerConfigPath, 'utf-8');
+      const dockerConfig: DockerContainerConfig = JSON.parse(configContent);
+
+      // Stop and remove containers by exact ID
+      if (dockerConfig.containerIds && dockerConfig.containerIds.length > 0) {
+        for (const containerId of dockerConfig.containerIds) {
+          await execCommand(`docker stop ${containerId}`, { cwd: input.cwd, timeout: 30000 });
+          await execCommand(`docker rm ${containerId}`, { cwd: input.cwd, timeout: 30000 });
+        }
+        cleanedContainers = true;
+        usedExactIds = true;
+      }
+
+      // Remove volumes by exact name
+      if (dockerConfig.volumeNames && dockerConfig.volumeNames.length > 0) {
+        for (const volumeName of dockerConfig.volumeNames) {
+          await execCommand(`docker volume rm ${volumeName}`, { cwd: input.cwd, timeout: 30000 });
+        }
+        cleanedVolumes = true;
+      }
+    } catch {
+      // Config file invalid or containers already removed - fall through to filter-based cleanup
+    }
+  }
+
+  // Fallback: use filter-based cleanup if exact IDs not available
+  // This is less precise but ensures cleanup still happens
+  if (!usedExactIds && session?.worktreeProjectId) {
+    try {
+      // Use exact name matching by listing containers and filtering in shell
+      // The filter pattern matches containers ending with the exact project ID
       await execCommand(
-        `docker ps -q --filter "name=supabase_.*_${session.worktreeProjectId}" | xargs -r docker stop`,
+        `docker ps -a --format "{{.Names}}" | grep "_${session.worktreeProjectId}$" | xargs -r docker stop`,
         { cwd: input.cwd, timeout: 30000 }
       );
-      // Delete stopped containers (docker rm)
       await execCommand(
-        `docker ps -aq --filter "name=supabase_.*_${session.worktreeProjectId}" | xargs -r docker rm`,
+        `docker ps -a --format "{{.Names}}" | grep "_${session.worktreeProjectId}$" | xargs -r docker rm`,
         { cwd: input.cwd, timeout: 30000 }
       );
       cleanedContainers = true;
@@ -95,19 +140,21 @@ async function handler(input: SessionEndInput): Promise<SessionEndHookOutput> {
       // Best effort - don't fail if cleanup fails
     }
 
-    // 1b. Delete associated Docker volumes to free disk space
-    try {
-      await execCommand(
-        `docker volume ls -q --filter "name=supabase_db_${session.worktreeProjectId}" | xargs -r docker volume rm`,
-        { cwd: input.cwd, timeout: 30000 }
-      );
-      await execCommand(
-        `docker volume ls -q --filter "name=supabase_storage_${session.worktreeProjectId}" | xargs -r docker volume rm`,
-        { cwd: input.cwd, timeout: 30000 }
-      );
-      cleanedVolumes = true;
-    } catch {
-      // Best effort - don't fail if cleanup fails
+    // 1b. Delete associated Docker volumes to free disk space (exact name match)
+    if (!cleanedVolumes) {
+      try {
+        await execCommand(
+          `docker volume rm "supabase_db_${session.worktreeProjectId}"`,
+          { cwd: input.cwd, timeout: 30000 }
+        );
+        await execCommand(
+          `docker volume rm "supabase_storage_${session.worktreeProjectId}"`,
+          { cwd: input.cwd, timeout: 30000 }
+        );
+        cleanedVolumes = true;
+      } catch {
+        // Best effort - don't fail if cleanup fails
+      }
     }
   }
 
