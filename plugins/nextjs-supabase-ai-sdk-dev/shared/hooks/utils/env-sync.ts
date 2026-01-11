@@ -405,20 +405,8 @@ export async function distributeEnvVars(
   // Prepare combined vars for frontend frameworks (Next.js or Vite)
   const frontendVars: Record<string, string> = {};
 
-  // Add Supabase vars with framework-specific prefix
-  if (vars.supabaseVars) {
-    for (const [key, value] of Object.entries(vars.supabaseVars)) {
-      if (key === 'SUPABASE_URL') {
-        frontendVars[`${publicPrefix}SUPABASE_URL`] = value;
-      } else if (key === 'SUPABASE_PUBLISHABLE_KEY') {
-        frontendVars[`${publicPrefix}SUPABASE_PUBLISHABLE_KEY`] = value;
-      } else if (key === 'SUPABASE_SECRET_KEY') {
-        frontendVars['SUPABASE_SECRET_KEY'] = value; // No prefix for secret
-      }
-    }
-  }
-
-  // Add Vercel vars - transform prefix if needed for Vite
+  // Add Vercel vars FIRST - these may contain old values from existing env files
+  // Supabase vars will be applied last to ensure correct values always win
   if (vars.vercelVars) {
     for (const [key, value] of Object.entries(vars.vercelVars)) {
       if (framework === 'vite' && key.startsWith('NEXT_PUBLIC_')) {
@@ -439,6 +427,20 @@ export async function distributeEnvVars(
         frontendVars[`VITE_${unprefixed}`] = value;
       } else {
         frontendVars[key] = value;
+      }
+    }
+  }
+
+  // Add Supabase vars LAST with framework-specific prefix
+  // Applied last so fresh values from Supabase CLI always override stale env file values
+  if (vars.supabaseVars) {
+    for (const [key, value] of Object.entries(vars.supabaseVars)) {
+      if (key === 'SUPABASE_URL') {
+        frontendVars[`${publicPrefix}SUPABASE_URL`] = value;
+      } else if (key === 'SUPABASE_PUBLISHABLE_KEY') {
+        frontendVars[`${publicPrefix}SUPABASE_PUBLISHABLE_KEY`] = value;
+      } else if (key === 'SUPABASE_SECRET_KEY') {
+        frontendVars['SUPABASE_SECRET_KEY'] = value; // No prefix for secret
       }
     }
   }
@@ -492,17 +494,8 @@ export async function distributeEnvVars(
   // Prepare vars for Cloudflare (unprefixed)
   const cloudflareVars: Record<string, string> = {};
 
-  // Add Supabase vars without NEXT_PUBLIC_ prefix
-  if (vars.supabaseVars) {
-    Object.assign(cloudflareVars, vars.supabaseVars);
-  }
-
-  // Add Cloudflare-specific vars
-  if (vars.cloudflareVars) {
-    Object.assign(cloudflareVars, vars.cloudflareVars);
-  }
-
-  // Add Vercel vars (strip NEXT_PUBLIC_ prefix for Cloudflare)
+  // Add Vercel vars FIRST (strip NEXT_PUBLIC_ prefix for Cloudflare)
+  // These may contain old values from existing env files
   if (vars.vercelVars) {
     for (const [key, value] of Object.entries(vars.vercelVars)) {
       if (key.startsWith('NEXT_PUBLIC_')) {
@@ -512,6 +505,17 @@ export async function distributeEnvVars(
         cloudflareVars[key] = value;
       }
     }
+  }
+
+  // Add Cloudflare-specific vars
+  if (vars.cloudflareVars) {
+    Object.assign(cloudflareVars, vars.cloudflareVars);
+  }
+
+  // Add Supabase vars LAST without NEXT_PUBLIC_ prefix
+  // Applied last so fresh values from Supabase CLI always override stale env file values
+  if (vars.supabaseVars) {
+    Object.assign(cloudflareVars, vars.supabaseVars);
   }
 
   // Write to dev.vars (only if wrangler.toml/wrangler.jsonc exists)
