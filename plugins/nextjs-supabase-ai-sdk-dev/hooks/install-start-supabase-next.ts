@@ -16,6 +16,7 @@ import { runHook } from '../shared/hooks/utils/io.js';
 import { detectPackageManager } from '../shared/hooks/utils/package-manager.js';
 import { isPortAvailable, findAvailablePort, killProcessOnPort, findAvailablePortAt10Increments } from '../shared/hooks/utils/port.js';
 import { getWranglerDevPort } from '../shared/hooks/utils/toml.js';
+import { findViteConfigPort } from '../shared/hooks/utils/vite-config.js';
 import { distributeEnvVars, mergeWorkspaceEnvVars, validateEnvVars, detectSupabaseUsage, hasSupabaseInMonorepo, generateAppUrls, detectWorkspaceFramework, type DevServerPorts, type WorkspaceInfo } from '../shared/hooks/utils/env-sync.js';
 import { detectWorktree, type WorktreeInfo } from '../shared/hooks/utils/worktree.js';
 import {
@@ -23,14 +24,16 @@ import {
   calculatePortSet,
   checkSupabasePortUsage,
   findAvailableSlot,
-  updateSupabaseConfigPorts,
   getSupabaseConfigPath,
   getOriginalProjectId,
   generateWorktreeProjectId,
-  updateSupabaseProjectId,
   buildExcludeFlags,
   type SupabasePortSet,
 } from '../shared/hooks/utils/supabase-ports.js';
+import {
+  createTmpSupabaseDir,
+  addToGitignore,
+} from '../shared/hooks/utils/supabase-tmp-config.js';
 import {
   loadWorktreeSupabaseSession,
   saveWorktreeSupabaseSession,
@@ -213,26 +216,22 @@ async function isSupabaseRunning(cwd: string): Promise<boolean> {
 }
 
 /**
- * Start Supabase local server
- */
-async function startSupabase(cwd: string): Promise<ExecResult> {
-  // 5 minute timeout for first run (downloads containers)
-  return await execCommand('supabase start', { cwd, timeout: 300000 });
-}
-
-/**
  * Export Supabase env vars to .env.local and dev.vars
  * Only saves 3 critical variables with correct prefixes
  * Maps deprecated variable names to modern ones
  *
  * @param supabaseRoot - Directory containing supabase/config.toml (where to run supabase CLI)
+ * @param workdir - Optional workdir path (for tmp directory approach)
  * @returns Object with vars, success status, and deprecation warnings
  */
 async function exportSupabaseEnvVars(
-  supabaseRoot: string
+  supabaseRoot: string,
+  workdir?: string
 ): Promise<{ vars: Record<string, string>; success: boolean; warnings: string[] }> {
   // Get raw env output from supabase root
-  const result = await execCommand('supabase status -o env', { cwd: supabaseRoot, timeout: 10000 });
+  // Use --workdir if tmp directory is provided
+  const workdirFlag = workdir ? ` --workdir ${workdir}` : '';
+  const result = await execCommand(`supabase status -o env${workdirFlag}`, { cwd: supabaseRoot, timeout: 10000 });
   if (!result.success) {
     return { vars: {}, success: false, warnings: [] };
   }
@@ -489,6 +488,11 @@ async function detectWorkspacePorts(cwd: string, workspaces: string[]): Promise<
       configuredPort = await getWranglerDevPort(wranglerTomlPath) ||
                        await getWranglerDevPort(wranglerJsoncPath) ||
                        null;
+    }
+
+    // For Vite projects, check vite.config.ts for server.port
+    if (configuredPort === null && wsProjectType === 'vite') {
+      configuredPort = findViteConfigPort(workspacePath);
     }
 
     // Get default port for this project type
@@ -1343,8 +1347,9 @@ async function findAvailableContainerName(baseProjectId: string): Promise<{ name
 }
 
 /**
- * Start Supabase with custom ports (for worktree instances)
- * Modifies config.toml, starts Supabase, and saves session state
+ * Start Supabase with custom ports using /tmp/ directory
+ * Creates a temporary config directory with symlinks, starts Supabase, and saves session state.
+ * Does NOT modify the original config.toml.
  */
 async function startWorktreeSupabase(
   cwd: string,
@@ -1354,10 +1359,11 @@ async function startWorktreeSupabase(
   worktreeInfo: WorktreeInfo,
   messages: string[],
   sessionId: string
-): Promise<{ success: boolean; configBackupPath?: string; projectId?: string }> {
+): Promise<{ success: boolean; tmpConfigDir?: string; projectId?: string }> {
   const configPath = getSupabaseConfigPath(cwd);
+  const originalSupabaseDir = join(cwd, 'supabase');
 
-  // Read original project_id (tries backup first to avoid cascading suffixes)
+  // Read original project_id from config.toml
   const originalProjectId = getOriginalProjectId(configPath, worktreeInfo.worktreeId);
   if (!originalProjectId) {
     messages.push('⚠️ Could not read project_id from config.toml');
@@ -1367,52 +1373,45 @@ async function startWorktreeSupabase(
   // Generate worktree-specific project_id
   const worktreeProjectId = generateWorktreeProjectId(originalProjectId, slot);
 
-  let configBackupPath: string | undefined;
-
-  // Update config for worktrees (slot > 0)
-  if (slot > 0) {
-    try {
-      const backupSuffix = `.backup-${worktreeInfo.worktreeId}`;
-
-      // Update BOTH project_id and ports in config.toml
-      configBackupPath = updateSupabaseProjectId(configPath, worktreeProjectId, backupSuffix);
-      updateSupabaseConfigPorts(configPath, supabasePorts, ''); // Ports already updated
-
-      messages.push(`✓ Updated config.toml for worktree slot ${slot}`);
-      messages.push(`  Project ID: ${originalProjectId} → ${worktreeProjectId}`);
-      messages.push(`  Backup: ${configBackupPath}`);
-    } catch (error) {
-      messages.push(`⚠️ Failed to update config.toml: ${error}`);
-      return { success: false };
-    }
-  } else {
-    // Main repo - still update ports but keep original project_id
-    try {
-      const backupSuffix = `.backup-main`;
-      configBackupPath = updateSupabaseConfigPorts(configPath, supabasePorts, backupSuffix);
-      messages.push(`✓ Using default project_id: ${originalProjectId}`);
-    } catch (error) {
-      messages.push(`⚠️ Failed to update ports: ${error}`);
-      return { success: false };
-    }
+  // Create temporary Supabase directory with symlinks
+  let tmpConfig;
+  try {
+    tmpConfig = createTmpSupabaseDir(
+      worktreeInfo.worktreeId,
+      originalSupabaseDir,
+      worktreeProjectId,
+      supabasePorts
+    );
+    messages.push(`✓ Created temporary Supabase config at ${tmpConfig.tmpDir}`);
+    messages.push(`  Project ID: ${originalProjectId} → ${worktreeProjectId}`);
+    messages.push(`  Symlinks: seed.sql, migrations/, functions/, templates/`);
+  } catch (error) {
+    messages.push(`⚠️ Failed to create tmp config directory: ${error}`);
+    return { success: false };
   }
 
-  // Build exclude flags for disabled services
-  const excludeFlags = buildExcludeFlags(configPath);
-  const startCommand = `supabase start${excludeFlags}`;
+  // Add to .gitignore if needed
+  const addedToGitignore = addToGitignore(cwd);
+  if (addedToGitignore) {
+    messages.push('✓ Added /tmp/supabase-* to .gitignore');
+  }
+
+  // Build exclude flags for disabled services (using tmp config)
+  const excludeFlags = buildExcludeFlags(tmpConfig.configPath);
+  const startCommand = `supabase start --workdir ${tmpConfig.tmpDir}${excludeFlags}`;
 
   if (excludeFlags) {
     const excluded = excludeFlags.replace(' --exclude ', '').split(',');
     messages.push(`⚡ Optimized: Skipping services: ${excluded.join(', ')}`);
   }
 
-  // Start Supabase
+  // Start Supabase using the tmp directory
   messages.push(`Starting Supabase: ${startCommand}`);
-  const startResult = await startSupabase(cwd);
+  const startResult = await execCommand(startCommand, { cwd, timeout: 300000 });
 
   if (!startResult.success) {
     messages.push(`⚠️ Failed to start Supabase: ${startResult.stderr}`);
-    return { success: false, configBackupPath };
+    return { success: false, tmpConfigDir: tmpConfig.tmpDir };
   }
 
   messages.push('✓ Supabase started with isolated containers');
@@ -1420,6 +1419,7 @@ async function startWorktreeSupabase(
   messages.push(`  Containers: supabase_*_${worktreeProjectId}`);
   messages.push(`  API: http://localhost:${supabasePorts.api}`);
   messages.push(`  Studio: http://localhost:${supabasePorts.studio}`);
+  messages.push(`  Inbucket (email): http://localhost:${supabasePorts.inbucket}`);
 
   // Save exact container IDs for scoped cleanup in SessionEnd hook
   // This prevents accidentally deleting containers from other sessions
@@ -1439,6 +1439,7 @@ async function startWorktreeSupabase(
           `supabase_db_${worktreeProjectId}`,
           `supabase_storage_${worktreeProjectId}`,
         ],
+        tmpConfigDir: tmpConfig.tmpDir,
         savedAt: new Date().toISOString(),
       };
       writeFileSync(dockerConfigPath, JSON.stringify(dockerConfig, null, 2));
@@ -1449,7 +1450,7 @@ async function startWorktreeSupabase(
     messages.push('  ⚠️ Could not save container IDs (cleanup may be less precise)');
   }
 
-  // Save session state with project IDs
+  // Save session state with project IDs and tmp directory
   const session: WorktreeSupabaseSession = {
     worktreeId: worktreeInfo.worktreeId,
     worktreePath: worktreeInfo.worktreePath,
@@ -1457,16 +1458,18 @@ async function startWorktreeSupabase(
     supabasePorts,
     devServerPorts,
     startedAt: new Date().toISOString(),
-    configBackupPath: configBackupPath || '',
+    configBackupPath: '', // No longer using backups - using tmp dir instead
     running: true,
     originalProjectId,
     worktreeProjectId,
     sessionId,
+    tmpConfigDir: tmpConfig.tmpDir,
+    originalSupabaseDir,
   };
 
   await saveWorktreeSupabaseSession(cwd, session);
 
-  return { success: true, configBackupPath, projectId: worktreeProjectId };
+  return { success: true, tmpConfigDir: tmpConfig.tmpDir, projectId: worktreeProjectId };
 }
 
 // ==================== Dependency Installation ====================
@@ -1668,6 +1671,8 @@ async function handler(input: SessionStartInput): Promise<SessionStartHookOutput
     let supabaseRunning = false;
     // Track worktree slot for dev server port allocation (slot 0 = default, slot N = +N*10 offset)
     const worktreeSlot = instanceConfig.slot;
+    // Track tmp config directory for supabase status commands
+    let supabaseTmpDir: string | undefined;
 
     if (dockerRunning) {
       if (instanceConfig.needsNewInstance) {
@@ -1683,12 +1688,14 @@ async function handler(input: SessionStartInput): Promise<SessionStartHookOutput
           input.session_id
         );
         supabaseRunning = startResult.success;
+        supabaseTmpDir = startResult.tmpConfigDir;
       } else if (instanceConfig.existingSession) {
         // Use existing worktree session
         messages.push('✓ Supabase already running (worktree session)');
         messages.push(`  API: http://localhost:${instanceConfig.supabasePorts.api}`);
         messages.push(`  Studio: http://localhost:${instanceConfig.supabasePorts.studio}`);
         supabaseRunning = true;
+        supabaseTmpDir = instanceConfig.existingSession.tmpConfigDir;
       } else {
         // Check if default Supabase is running
         const supabaseInfo = await detectSharedSupabase(input.cwd);
@@ -1716,7 +1723,7 @@ async function handler(input: SessionStartInput): Promise<SessionStartHookOutput
         // Collect Supabase vars if running
         let supabaseVars: Record<string, string> | undefined;
         if (supabaseRunning) {
-          const result = await exportSupabaseEnvVars(input.cwd);
+          const result = await exportSupabaseEnvVars(input.cwd, supabaseTmpDir);
           if (result.success) {
             supabaseVars = result.vars;
             // Show deprecation warnings if any
@@ -1732,7 +1739,7 @@ async function handler(input: SessionStartInput): Promise<SessionStartHookOutput
       }
     } else if (supabaseRunning) {
       // For single projects: export Supabase vars to root
-      const result = await exportSupabaseEnvVars(input.cwd);
+      const result = await exportSupabaseEnvVars(input.cwd, supabaseTmpDir);
       if (result.success && Object.keys(result.vars).length > 0) {
         // Show deprecation warnings if any
         if (result.warnings.length > 0) {

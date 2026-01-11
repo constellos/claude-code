@@ -222,3 +222,137 @@ export async function findAvailablePortAt10Increments(
   }
   return null;
 }
+
+// ============================================================================
+// App Port Configuration Types and Functions
+// ============================================================================
+
+/**
+ * Project type for port defaults
+ */
+export type ProjectType = 'nextjs' | 'cloudflare' | 'vite' | 'elysia' | 'turborepo' | 'unknown';
+
+/**
+ * Port configuration for a single app/workspace
+ */
+export interface AppPortConfig {
+  /** Path to the app/workspace */
+  workspace: string;
+  /** Detected project type */
+  projectType: ProjectType;
+  /** Port from config file (--port flag, wrangler.toml, vite.config.ts) */
+  configuredPort: number | null;
+  /** Default port for this project type */
+  defaultPort: number;
+  /** Final resolved port to use (after availability check) */
+  resolvedPort: number;
+}
+
+/**
+ * Default ports for each project type
+ */
+export const DEFAULT_PORTS: Record<ProjectType, number> = {
+  nextjs: 3000,
+  cloudflare: 8787,
+  vite: 5173,
+  elysia: 3000,
+  turborepo: 3000,
+  unknown: 3000,
+};
+
+/**
+ * Get the default port for a project type
+ *
+ * @param projectType - Type of project
+ * @returns Default port number
+ */
+export function getDefaultPort(projectType: ProjectType): number {
+  return DEFAULT_PORTS[projectType] ?? 3000;
+}
+
+/**
+ * Resolve ports for multiple apps, checking availability sequentially
+ *
+ * For each app:
+ * 1. Try configuredPort (from config file) if set
+ * 2. Fall back to defaultPort for project type
+ * 3. If that port is unavailable, find next port at +10 increments
+ *
+ * Apps are processed sequentially to avoid allocating the same port twice.
+ * Claimed ports are tracked internally to prevent conflicts.
+ *
+ * @param apps - Array of app port configurations (mutated with resolvedPort)
+ * @returns Promise resolving to the same array with resolvedPort filled in
+ *
+ * @example
+ * ```typescript
+ * const apps: AppPortConfig[] = [
+ *   { workspace: 'apps/web', projectType: 'nextjs', configuredPort: null, defaultPort: 3000, resolvedPort: 0 },
+ *   { workspace: 'apps/api', projectType: 'cloudflare', configuredPort: 8787, defaultPort: 8787, resolvedPort: 0 },
+ * ];
+ *
+ * await resolveAppPorts(apps);
+ * // apps[0].resolvedPort = 3000 (or 3010 if 3000 was in use)
+ * // apps[1].resolvedPort = 8787 (or 8797 if 8787 was in use)
+ * ```
+ */
+export async function resolveAppPorts(apps: AppPortConfig[]): Promise<AppPortConfig[]> {
+  // Track ports we've already claimed in this resolution
+  const claimedPorts = new Set<number>();
+
+  for (const app of apps) {
+    // Determine the preferred port (configured or default)
+    const preferredPort = app.configuredPort ?? app.defaultPort;
+
+    // Check if preferred port is available and not already claimed
+    const preferredAvailable = await isPortAvailable(preferredPort);
+    if (preferredAvailable && !claimedPorts.has(preferredPort)) {
+      app.resolvedPort = preferredPort;
+      claimedPorts.add(preferredPort);
+      continue;
+    }
+
+    // Port not available, find next at +10 increments
+    const resolvedPort = await findAvailablePortAt10IncrementsExcluding(
+      preferredPort,
+      claimedPorts,
+      25
+    );
+
+    if (resolvedPort !== null) {
+      app.resolvedPort = resolvedPort;
+      claimedPorts.add(resolvedPort);
+    } else {
+      // Fallback: use preferred port anyway (will likely fail at runtime)
+      app.resolvedPort = preferredPort;
+    }
+  }
+
+  return apps;
+}
+
+/**
+ * Find available port at +10 increments, excluding already claimed ports
+ *
+ * @param basePort - Starting port
+ * @param excludePorts - Set of ports to skip
+ * @param maxSlots - Maximum slots to check
+ * @returns Available port, or null if none found
+ */
+async function findAvailablePortAt10IncrementsExcluding(
+  basePort: number,
+  excludePorts: Set<number>,
+  maxSlots: number = 25
+): Promise<number | null> {
+  for (let slot = 0; slot < maxSlots; slot++) {
+    const port = basePort + slot * 10;
+    if (excludePorts.has(port)) {
+      continue;
+    }
+    const available = await isPortAvailable(port);
+    if (available) {
+      return port;
+    }
+  }
+  return null;
+}
