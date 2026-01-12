@@ -33,36 +33,43 @@ const SYMLINK_ITEMS = ['seed.sql', 'migrations', 'functions', 'templates'] as co
 
 
 /**
- * Generate the tmp directory path for a worktree
- * Uses a normalized worktree ID for consistency
+ * Generate the tmp directory path for a Supabase instance
  *
- * @param worktreeId - The worktree identifier (8-char hash or similar)
- * @returns Path to tmp directory (e.g., /tmp/supabase-abc12345)
+ * IMPORTANT: Supabase CLI uses the workdir directory basename for container naming,
+ * NOT the project_id from config.toml. So we must name the directory after the projectId.
+ *
+ * @param projectId - The full project ID including slot suffix (e.g., "constellos" or "constellos-1")
+ * @returns Path to tmp directory (e.g., /tmp/constellos or /tmp/constellos-1)
+ *
+ * @example
+ * ```typescript
+ * getTmpSupabasePath('constellos')    // Returns: '/tmp/constellos'
+ * getTmpSupabasePath('constellos-1')  // Returns: '/tmp/constellos-1'
+ * getTmpSupabasePath('constellos-2')  // Returns: '/tmp/constellos-2'
+ * ```
  */
-export function getTmpSupabasePath(worktreeId: string): string {
-  // Normalize worktree ID to lowercase alphanumeric with dashes
-  const normalizedId = worktreeId.toLowerCase().replace(/[^a-z0-9-]/g, '');
-  return `/tmp/supabase-${normalizedId}`;
+export function getTmpSupabasePath(projectId: string): string {
+  // Normalize project ID to lowercase alphanumeric with dashes
+  const normalizedId = projectId.toLowerCase().replace(/[^a-z0-9-]/g, '');
+  return `/tmp/${normalizedId}`;
 }
 
 /**
  * Create a fresh temporary Supabase directory with symlinks
  * Cleans up any existing directory first (fresh each session)
  *
- * @param worktreeId - The worktree identifier
+ * @param projectId - Full project ID including slot suffix (e.g., "constellos" or "constellos-1")
  * @param originalSupabaseDir - Path to original supabase/ directory
- * @param projectId - Project ID to use in config
  * @param ports - Port set to configure
  * @returns Configuration for the tmp directory
  * @throws Error if original directory doesn't exist or can't create tmp
  */
 export function createTmpSupabaseDir(
-  worktreeId: string,
-  originalSupabaseDir: string,
   projectId: string,
+  originalSupabaseDir: string,
   ports: SupabasePortSet
 ): TmpSupabaseConfig {
-  const tmpDir = getTmpSupabasePath(worktreeId);
+  const tmpDir = getTmpSupabasePath(projectId);
 
   // Verify original directory exists
   if (!existsSync(originalSupabaseDir)) {
@@ -242,24 +249,24 @@ export function addToGitignore(projectRoot: string, _tmpPath?: string): boolean 
 }
 
 /**
- * Check if a tmp Supabase directory exists for a worktree
+ * Check if a tmp Supabase directory exists for a project
  *
- * @param worktreeId - The worktree identifier
+ * @param projectId - The full project ID including slot suffix
  * @returns true if tmp directory exists
  */
-export function tmpSupabaseDirExists(worktreeId: string): boolean {
-  const tmpDir = getTmpSupabasePath(worktreeId);
+export function tmpSupabaseDirExists(projectId: string): boolean {
+  const tmpDir = getTmpSupabasePath(projectId);
   return existsSync(tmpDir);
 }
 
 /**
  * Get the config.toml path for a tmp Supabase directory
  *
- * @param worktreeId - The worktree identifier
+ * @param projectId - The full project ID including slot suffix
  * @returns Path to config.toml in tmp directory
  */
-export function getTmpConfigPath(worktreeId: string): string {
-  return join(getTmpSupabasePath(worktreeId), 'config.toml');
+export function getTmpConfigPath(projectId: string): string {
+  return join(getTmpSupabasePath(projectId), 'config.toml');
 }
 
 /**
