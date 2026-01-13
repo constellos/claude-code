@@ -70,6 +70,8 @@ export function createTmpSupabaseDir(
   ports: SupabasePortSet
 ): TmpSupabaseConfig {
   const tmpDir = getTmpSupabasePath(projectId);
+  // Supabase CLI expects supabase/ subdirectory inside --workdir
+  const tmpSupabaseDir = join(tmpDir, 'supabase');
 
   // Verify original directory exists
   if (!existsSync(originalSupabaseDir)) {
@@ -86,14 +88,16 @@ export function createTmpSupabaseDir(
     rmSync(tmpDir, { recursive: true, force: true });
   }
 
-  // Create tmp directory
-  mkdirSync(tmpDir, { recursive: true });
+  // Create tmp directory with supabase/ subdirectory
+  // Structure: /tmp/{projectId}/supabase/config.toml
+  // This matches what Supabase CLI expects with --workdir flag
+  mkdirSync(tmpSupabaseDir, { recursive: true });
 
-  // Create symlinks for allowed items
-  createSymlinks(tmpDir, originalSupabaseDir);
+  // Create symlinks for allowed items inside supabase/ subdirectory
+  createSymlinks(tmpSupabaseDir, originalSupabaseDir);
 
-  // Copy and update config.toml
-  const tmpConfigPath = join(tmpDir, 'config.toml');
+  // Copy and update config.toml inside supabase/ subdirectory
+  const tmpConfigPath = join(tmpSupabaseDir, 'config.toml');
   copyAndUpdateConfig(originalConfigPath, tmpConfigPath, projectId, ports);
 
   return {
