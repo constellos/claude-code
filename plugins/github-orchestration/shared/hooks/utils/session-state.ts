@@ -65,6 +65,11 @@ export interface SessionStopState {
    * When current HEAD matches this, we've already seen these commits
    */
   lastSeenCommitSha?: string;
+  /**
+   * Commit SHA when comment was posted - used to detect new commits after comment
+   * If current HEAD differs from this, new commits need documentation
+   */
+  commentPostedAtSha?: string;
 }
 
 /**
