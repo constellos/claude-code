@@ -1323,7 +1323,7 @@ async function cleanupOrphanedSessions(
 
 /**
  * Find the next available Supabase container name based on what's actually running in Docker
- * Returns base name if available, otherwise base-1, base-2, etc.
+ * Always uses suffixed naming: base-0, base-1, base-2, etc. (never bare project name)
  */
 async function findAvailableContainerName(baseProjectId: string): Promise<{ name: string; slot: number }> {
   try {
@@ -1343,13 +1343,9 @@ async function findAvailableContainerName(baseProjectId: string): Promise<{ name
       }
     }
 
-    // Try base name first (e.g., "constellos")
-    if (!runningProjectIds.has(baseProjectId)) {
-      return { name: baseProjectId, slot: 0 };
-    }
-
-    // Find next available suffix: constellos-1, constellos-2, etc.
-    for (let i = 1; i < 10; i++) {
+    // Find next available suffix: constellos-0, constellos-1, constellos-2, etc.
+    // Always use -N suffix for consistent naming (never bare project name)
+    for (let i = 0; i < 10; i++) {
       const candidate = `${baseProjectId}-${i}`;
       if (!runningProjectIds.has(candidate)) {
         return { name: candidate, slot: i };
@@ -1357,10 +1353,10 @@ async function findAvailableContainerName(baseProjectId: string): Promise<{ name
     }
 
     // All slots taken, fall back to slot 0 (will likely fail but let user know)
-    return { name: baseProjectId, slot: 0 };
+    return { name: `${baseProjectId}-0`, slot: 0 };
   } catch {
-    // Docker not available - assume base is available
-    return { name: baseProjectId, slot: 0 };
+    // Docker not available - assume slot 0 is available
+    return { name: `${baseProjectId}-0`, slot: 0 };
   }
 }
 
