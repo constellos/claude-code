@@ -1730,7 +1730,7 @@ async function handler(input: SessionStartInput): Promise<SessionStartHookOutput
 
     // Pre-calculate dev server ports for URL generation
     // This ensures env vars include correct URLs before servers start
-    const preCalculatedPorts = await findAvailableDevServerPorts();
+    let preCalculatedPorts = await findAvailableDevServerPorts();
 
     if (projectType === 'turborepo') {
       const workspaces = detectTurborepoWorkspaces(input.cwd);
@@ -1836,31 +1836,49 @@ async function handler(input: SessionStartInput): Promise<SessionStartHookOutput
             .join(', ');
           messages.push(`  Workspaces: ${portSummary}`);
 
-          // Check if pre-calculated ports are available (these are the ports we'll actually use)
-          // Only kill stale processes on the ACTUAL ports we're going to use, not configured ports
-          // This prevents killing dev servers from other sessions that are using different ports
-          const actualPortsToUse = [
-            preCalculatedPorts.nextjs,
-            preCalculatedPorts.vite,
-            preCalculatedPorts.cloudflare,
-          ].filter((p): p is number => typeof p === 'number' && p > 0);
+          // Re-check port availability and find alternatives if needed
+          // NEVER kill processes - other Claude sessions may be using these ports
+          const finalPorts = { ...preCalculatedPorts };
 
-          for (const port of actualPortsToUse) {
-            const available = await isPortAvailable(port);
-            if (!available) {
-              messages.push(`  ⚠️ Port ${port} in use, killing stale process...`);
-              const killed = await killProcessOnPort(port);
-              if (killed) {
-                messages.push(`  ✓ Freed port ${port}`);
-              } else {
-                messages.push(`  ⚠️ Could not free port ${port} - server may fail to start`);
-              }
+          const nextjsAvailable = await isPortAvailable(finalPorts.nextjs);
+          if (!nextjsAvailable) {
+            const newPort = await findAvailablePortAt10Increments(finalPorts.nextjs + 10, 25);
+            if (newPort) {
+              messages.push(`  ℹ️ Port ${finalPorts.nextjs} in use, using ${newPort}`);
+              finalPorts.nextjs = newPort;
+            } else {
+              messages.push(`  ⚠️ Could not find available Next.js port after ${finalPorts.nextjs}`);
             }
           }
 
+          const viteAvailable = await isPortAvailable(finalPorts.vite);
+          if (!viteAvailable) {
+            const newPort = await findAvailablePortAt10Increments(finalPorts.vite + 10, 25);
+            if (newPort) {
+              messages.push(`  ℹ️ Port ${finalPorts.vite} in use, using ${newPort}`);
+              finalPorts.vite = newPort;
+            } else {
+              messages.push(`  ⚠️ Could not find available Vite port after ${finalPorts.vite}`);
+            }
+          }
+
+          const cloudflareAvailable = await isPortAvailable(finalPorts.cloudflare);
+          if (!cloudflareAvailable) {
+            const newPort = await findAvailablePortAt10Increments(finalPorts.cloudflare + 10, 25);
+            if (newPort) {
+              messages.push(`  ℹ️ Port ${finalPorts.cloudflare} in use, using ${newPort}`);
+              finalPorts.cloudflare = newPort;
+            } else {
+              messages.push(`  ⚠️ Could not find available Cloudflare port after ${finalPorts.cloudflare}`);
+            }
+          }
+
+          // Update preCalculatedPorts to use the final allocated ports
+          preCalculatedPorts = finalPorts;
+
           // Show which ports will be used vs configured
-          if (preCalculatedPorts.nextjs !== 3000 || preCalculatedPorts.vite !== 5173 || preCalculatedPorts.cloudflare !== 8787) {
-            messages.push(`  Using ports: Next.js=${preCalculatedPorts.nextjs}, Vite=${preCalculatedPorts.vite}, Cloudflare=${preCalculatedPorts.cloudflare}`);
+          if (finalPorts.nextjs !== 3000 || finalPorts.vite !== 5173 || finalPorts.cloudflare !== 8787) {
+            messages.push(`  Using ports: Next.js=${finalPorts.nextjs}, Vite=${finalPorts.vite}, Cloudflare=${finalPorts.cloudflare}`);
           }
 
           // Check for missing env passthrough vars
@@ -1930,8 +1948,24 @@ async function handler(input: SessionStartInput): Promise<SessionStartHookOutput
                   // Use consistent naming: NEXT_PUBLIC_{NAME}_URL for Next.js, {NAME}_URL for Cloudflare
                   if (actualPort !== configuredPort) {
                     const mcpUrl = `http://localhost:${actualPort}`;
-                    // Extract workspace name (e.g., "apps/mcp" → "MCP")
-                    const mcpName = mcpWorkspace.split('/').pop()?.toUpperCase().replace(/-/g, '_') || 'MCP';
+                    // Read package.json name from MCP workspace
+                    const mcpPackageJsonPath = join(input.cwd, mcpWorkspace, 'package.json');
+                    let mcpName = 'MCP';
+                    try {
+                      if (existsSync(mcpPackageJsonPath)) {
+                        const pkgJson = JSON.parse(readFileSync(mcpPackageJsonPath, 'utf-8'));
+                        if (pkgJson.name) {
+                          // Extract name: "@constellos/mcp" → "MCP", "mcp-server" → "MCP_SERVER"
+                          mcpName = pkgJson.name
+                            .replace(/^@[^/]+\//, '')  // Remove scope (@org/)
+                            .toUpperCase()
+                            .replace(/-/g, '_');
+                        }
+                      }
+                    } catch {
+                      // Fallback to directory name
+                      mcpName = mcpWorkspace.split('/').pop()?.toUpperCase().replace(/-/g, '_') || 'MCP';
+                    }
                     // Distribute updated MCP URL to all workspaces with correct var names
                     for (const ws of workspaces) {
                       const wsPath = join(input.cwd, ws);
