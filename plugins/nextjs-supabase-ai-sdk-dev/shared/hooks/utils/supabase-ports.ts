@@ -443,13 +443,12 @@ export function getOriginalProjectId(configPath: string, worktreeId?: string): s
  * @returns Worktree-specific project_id
  * @example
  * ```typescript
- * generateWorktreeProjectId('myapp', 0)  // Returns: "myapp"
+ * generateWorktreeProjectId('myapp', 0)  // Returns: "myapp-0"
  * generateWorktreeProjectId('myapp', 1)  // Returns: "myapp-1"
  * generateWorktreeProjectId('myapp', 2)  // Returns: "myapp-2"
  * ```
  */
 export function generateWorktreeProjectId(originalId: string, slot: number): string {
-  if (slot === 0) return originalId;
   return `${originalId}-${slot}`;
 }
 
