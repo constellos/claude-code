@@ -322,14 +322,27 @@ async function distributeAllEnvVars(
   let appUrlsByWorkspace: Map<string, Record<string, string>> | null = null;
   if (devServerPorts) {
     // Build workspace info for URL generation
-    // Extract configured ports from package.json dev scripts
-    const workspaceInfos: WorkspaceInfo[] = workspaces.map(ws => {
+    // Extract configured ports from package.json dev scripts AND wrangler.toml
+    const workspaceInfos: WorkspaceInfo[] = [];
+    for (const ws of workspaces) {
       const wsPath = join(cwd, ws);
       const name = ws.split('/').pop() || ws;
       const framework = detectWorkspaceFramework(wsPath);
-      const configuredPort = extractPortFromDevScript(join(wsPath, 'package.json'));
-      return { path: ws, name, framework, configuredPort };
-    });
+
+      // First try package.json dev script
+      let configuredPort = extractPortFromDevScript(join(wsPath, 'package.json'));
+
+      // For Cloudflare workers, also check wrangler.toml if no port in dev script
+      if (configuredPort === null && framework === 'cloudflare') {
+        const wranglerTomlPath = join(wsPath, 'wrangler.toml');
+        const wranglerJsoncPath = join(wsPath, 'wrangler.jsonc');
+        configuredPort = await getWranglerDevPort(wranglerTomlPath) ||
+                         await getWranglerDevPort(wranglerJsoncPath) ||
+                         null;
+      }
+
+      workspaceInfos.push({ path: ws, name, framework, configuredPort });
+    }
 
     appUrlsByWorkspace = generateAppUrls(workspaceInfos, devServerPorts);
   }
@@ -1379,12 +1392,13 @@ async function startWorktreeSupabase(
   const worktreeProjectId = generateWorktreeProjectId(originalProjectId, slot);
 
   // Create temporary Supabase directory with symlinks
+  // Note: Directory is named after projectId (not worktreeId) so Supabase CLI
+  // creates containers with correct names like supabase_*_constellos-1
   let tmpConfig;
   try {
     tmpConfig = createTmpSupabaseDir(
-      worktreeInfo.worktreeId,
-      originalSupabaseDir,
       worktreeProjectId,
+      originalSupabaseDir,
       supabasePorts
     );
     messages.push(`✓ Created temporary Supabase config at ${tmpConfig.tmpDir}`);
@@ -1916,19 +1930,27 @@ async function handler(input: SessionStartInput): Promise<SessionStartHookOutput
                   messages.push(`  Logs: ${mcpResult.logs.stdout}`);
                   messages.push(`  URL: http://localhost:${actualPort}`);
 
-                  // Update NEXT_PUBLIC_MCP_SERVER_URL if port changed
+                  // Update MCP URL env vars if port changed
+                  // Use consistent naming: NEXT_PUBLIC_{NAME}_URL for Next.js, {NAME}_URL for Cloudflare
                   if (actualPort !== configuredPort) {
                     const mcpUrl = `http://localhost:${actualPort}`;
-                    // Distribute updated MCP URL to all workspaces
+                    // Extract workspace name (e.g., "apps/mcp" → "MCP")
+                    const mcpName = mcpWorkspace.split('/').pop()?.toUpperCase().replace(/-/g, '_') || 'MCP';
+                    // Distribute updated MCP URL to all workspaces with correct var names
                     for (const ws of workspaces) {
                       const wsPath = join(input.cwd, ws);
+                      const wsType = detectProjectType(wsPath);
+                      // Use framework-appropriate variable name
+                      const varName = wsType === 'nextjs' ? `NEXT_PUBLIC_${mcpName}_URL` :
+                                     wsType === 'vite' ? `VITE_${mcpName}_URL` :
+                                     `${mcpName}_URL`;
                       await distributeEnvVars(
                         wsPath,
-                        { supabaseVars: {}, vercelVars: { NEXT_PUBLIC_MCP_SERVER_URL: mcpUrl } },
+                        { supabaseVars: {}, vercelVars: { [varName]: mcpUrl } },
                         { createIfMissing: false, preserveExisting: true }
                       );
                     }
-                    messages.push(`  ✓ Updated NEXT_PUBLIC_MCP_SERVER_URL to ${mcpUrl}`);
+                    messages.push(`  ✓ Updated ${mcpName}_URL to ${mcpUrl}`);
                   }
                 } else {
                   messages.push('⚠️ Could not start MCP worker');
