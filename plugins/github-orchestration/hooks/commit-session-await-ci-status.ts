@@ -1202,12 +1202,28 @@ ${checksTable}
 
     // No PR - check if comment posted for this session
     // First check session state flag (survives across stop attempts)
+    // BUT also check if new commits were made since the comment was posted
     if (sessionState.commentPosted) {
-      await logger.logOutput({ debug: 'Comment previously posted - allowing stop' });
-      return {
-        decision: 'approve',
-        systemMessage: '✅ Session progress already documented'
-      };
+      const currentHeadSha = await getCurrentHeadSha(repoRoot);
+
+      // If we have a commentPostedAtSha, check if new commits were made since then
+      if (sessionState.commentPostedAtSha &&
+          currentHeadSha !== sessionState.commentPostedAtSha) {
+        // New commits since comment - reset flag and require new documentation
+        await logger.logOutput({ debug: 'New commits since comment - resetting commentPosted flag' });
+        await updateSessionStopState(input.session_id, {
+          commentPosted: false,
+          commentPostedAtSha: undefined,
+        }, repoRoot);
+        // Fall through to blocking logic below
+      } else {
+        // Same commit or no tracking - allow stop
+        await logger.logOutput({ debug: 'Comment previously posted - allowing stop' });
+        return {
+          decision: 'approve',
+          systemMessage: '✅ Session progress already documented'
+        };
+      }
     }
 
     // Try to discover linked issue
@@ -1218,9 +1234,11 @@ ${checksTable}
 
     // Check GitHub for comment if we have an issue number
     if (issueNumber && await hasCommentForSession(issueNumber, input.session_id, repoRoot)) {
-      // Comment posted - update state flag and reset block count
+      // Comment posted - update state flag, save SHA, and reset block count
+      const currentSha = await getCurrentHeadSha(repoRoot);
       await updateSessionStopState(input.session_id, {
         commentPosted: true,
+        commentPostedAtSha: currentSha || undefined,  // Track when comment was posted
         blockCount: 0,
       }, repoRoot);
 
