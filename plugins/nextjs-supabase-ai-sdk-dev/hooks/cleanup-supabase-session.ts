@@ -86,10 +86,11 @@ async function handler(input: SessionEndInput): Promise<SessionEndHookOutput> {
   let cleanedVolumes = false;
 
   // 0. Try supabase stop --workdir first (cleanest approach for tmp directory sessions)
+  // Use --no-backup to delete volumes (without it, supabase stop only stops containers)
   if (session?.tmpConfigDir && existsSync(session.tmpConfigDir)) {
     try {
       const stopResult = await execCommand(
-        `supabase stop --workdir ${session.tmpConfigDir}`,
+        `supabase stop --workdir ${session.tmpConfigDir} --no-backup`,
         { cwd: input.cwd, timeout: 60000 }
       );
       if (stopResult.success) {
