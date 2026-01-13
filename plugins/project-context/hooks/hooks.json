@@ -10,6 +10,17 @@
   ],
   "description": "Enhanced context discovery and maintenance for Claude Code",
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx tsx ${CLAUDE_PLUGIN_ROOT}/hooks/setup-nodes-config.ts",
+            "description": "Creates .nodes/.mcp.nodes.json config for the nodes-md MCP proxy"
+          }
+        ]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "hooks": [
