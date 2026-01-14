@@ -15,6 +15,7 @@
 
 import { existsSync, readFileSync, writeFileSync, readdirSync } from 'fs';
 import { join } from 'path';
+import { isPortAvailable } from './port.js';
 
 /**
  * Workspace framework type for environment variable prefixing
@@ -608,6 +609,97 @@ export interface WorkspaceInfo {
   framework: WorkspaceFramework;
   /** Port configured in package.json dev script (--port flag), or null if not configured */
   configuredPort: number | null;
+  /** Port after availability check - use this instead of configuredPort for URL generation */
+  resolvedPort?: number;
+}
+
+/**
+ * Resolve ports for workspaces, checking availability and finding alternatives
+ *
+ * For each workspace:
+ * 1. Try configuredPort (from package.json) if set
+ * 2. Fall back to base port from DevServerPorts
+ * 3. If port is unavailable, find next available at +10 increments
+ *
+ * This ensures multiple Claude sessions can run in parallel without port conflicts.
+ *
+ * @param workspaces - Array of workspace info objects (mutated with resolvedPort)
+ * @param basePorts - Base ports for each framework type
+ * @returns Promise resolving to the same array with resolvedPort filled in
+ *
+ * @example
+ * ```typescript
+ * import { resolveWorkspacePorts } from './env-sync.js';
+ *
+ * const workspaces = [
+ *   { path: 'apps/app', name: 'app', framework: 'nextjs', configuredPort: 3100 },
+ *   { path: 'apps/mcp', name: 'mcp', framework: 'cloudflare', configuredPort: 3102 },
+ * ];
+ *
+ * await resolveWorkspacePorts(workspaces, { nextjs: 3000, vite: 5173, cloudflare: 8787 });
+ * // If 3100 is in use: workspaces[0].resolvedPort = 3110
+ * // If 3102 is in use: workspaces[1].resolvedPort = 3112
+ * ```
+ */
+export async function resolveWorkspacePorts(
+  workspaces: WorkspaceInfo[],
+  basePorts: DevServerPorts
+): Promise<WorkspaceInfo[]> {
+  // Track ports we've already claimed in this resolution to avoid duplicates
+  const claimedPorts = new Set<number>();
+
+  // Only process workspaces with dev servers
+  const appWorkspaces = workspaces.filter(
+    (ws) =>
+      ws.framework === 'nextjs' || ws.framework === 'vite' || ws.framework === 'cloudflare'
+  );
+
+  for (const ws of appWorkspaces) {
+    // Determine the preferred port (configured or framework default)
+    const preferredPort = ws.configuredPort ?? basePorts[ws.framework as keyof DevServerPorts];
+
+    // Check if preferred port is available and not already claimed
+    const available = await isPortAvailable(preferredPort);
+    if (available && !claimedPorts.has(preferredPort)) {
+      ws.resolvedPort = preferredPort;
+      claimedPorts.add(preferredPort);
+      continue;
+    }
+
+    // Port not available, find next at +10 increments
+    const resolvedPort = await findAvailablePortExcluding(preferredPort, claimedPorts, 25);
+
+    if (resolvedPort !== null) {
+      ws.resolvedPort = resolvedPort;
+      claimedPorts.add(resolvedPort);
+    } else {
+      // Fallback: use preferred port anyway (will likely fail at runtime)
+      ws.resolvedPort = preferredPort;
+    }
+  }
+
+  return workspaces;
+}
+
+/**
+ * Find available port at +10 increments, excluding already claimed ports
+ */
+async function findAvailablePortExcluding(
+  basePort: number,
+  excludePorts: Set<number>,
+  maxSlots: number = 25
+): Promise<number | null> {
+  for (let slot = 0; slot < maxSlots; slot++) {
+    const port = basePort + slot * 10;
+    if (excludePorts.has(port)) {
+      continue;
+    }
+    const available = await isPortAvailable(port);
+    if (available) {
+      return port;
+    }
+  }
+  return null;
 }
 
 /**
@@ -675,12 +767,15 @@ export function generateAppUrls(
   };
 
   // Assign ports to each app workspace
-  // Priority: configuredPort > base port + offset
+  // Priority: resolvedPort (after availability check) > configuredPort > base port + offset
   for (const ws of appWorkspaces) {
     let port: number;
 
-    if (ws.configuredPort !== null) {
-      // Use the port configured in package.json dev script
+    if (ws.resolvedPort !== undefined) {
+      // Use pre-resolved port (already checked for availability)
+      port = ws.resolvedPort;
+    } else if (ws.configuredPort !== null) {
+      // Fallback to configured port (legacy behavior, no availability check)
       port = ws.configuredPort;
     } else {
       // Fall back to base port + offset for workspaces without configured port
