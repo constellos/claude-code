@@ -20,7 +20,7 @@ import { isPortAvailable } from './port.js';
 /**
  * Workspace framework type for environment variable prefixing
  */
-export type WorkspaceFramework = 'nextjs' | 'vite' | 'cloudflare' | 'unknown';
+export type WorkspaceFramework = 'nextjs' | 'vite' | 'cloudflare' | 'elysia' | 'unknown';
 
 /**
  * Detect if a workspace uses Supabase by checking dependencies
@@ -165,6 +165,11 @@ export function detectWorkspaceFramework(workspacePath: string): WorkspaceFramew
       if ('wrangler' in allDeps || '@cloudflare/workers-types' in allDeps) {
         return 'cloudflare';
       }
+
+      // Check for Elysia dependency (Bun framework)
+      if ('elysia' in allDeps) {
+        return 'elysia';
+      }
     } catch {
       // Ignore parse errors
     }
@@ -185,6 +190,8 @@ export function getPublicEnvPrefix(framework: WorkspaceFramework): string {
       return 'NEXT_PUBLIC_';
     case 'vite':
       return 'VITE_';
+    case 'elysia':
+    case 'cloudflare':
     default:
       return '';
   }
@@ -746,7 +753,8 @@ export function generateAppUrls(
   const appWorkspaces = workspaces.filter(ws =>
     ws.framework === 'nextjs' ||
     ws.framework === 'vite' ||
-    ws.framework === 'cloudflare'
+    ws.framework === 'cloudflare' ||
+    ws.framework === 'elysia'
   );
 
   // First, calculate the actual port for each app workspace
@@ -755,6 +763,7 @@ export function generateAppUrls(
     nextjs: ports.nextjs,
     vite: ports.vite,
     cloudflare: ports.cloudflare,
+    elysia: ports.nextjs,  // Elysia uses port 3000 like Next.js
     unknown: ports.nextjs,
   };
 
@@ -763,6 +772,7 @@ export function generateAppUrls(
     nextjs: [],
     vite: [],
     cloudflare: [],
+    elysia: [],
     unknown: [],
   };
 
@@ -795,12 +805,24 @@ export function generateAppUrls(
     const url = `http://localhost:${port}`;
     const vars: Record<string, string> = {};
 
-    // Self-reference URL
+    // Self-reference URL with app-specific naming
+    const nameUpper = ws.name.toUpperCase().replace(/-/g, '_');
+
     if (ws.framework === 'nextjs') {
-      vars['NEXT_PUBLIC_APP_URL'] = url;
+      // Add both app-specific name and generic APP_URL for compatibility
+      vars[`NEXT_PUBLIC_${nameUpper}_URL`] = url;  // e.g., NEXT_PUBLIC_WEB_URL
+      vars['NEXT_PUBLIC_APP_URL'] = url;            // Backwards compatibility
+      vars[`${nameUpper}_URL`] = url;               // Server-side (WEB_URL)
     } else if (ws.framework === 'vite') {
+      vars[`VITE_${nameUpper}_URL`] = url;
       vars['VITE_APP_URL'] = url;
+      vars[`${nameUpper}_URL`] = url;
+    } else if (ws.framework === 'elysia') {
+      vars[`${nameUpper}_URL`] = url;
+      vars['APP_URL'] = url;
     } else {
+      // Cloudflare workers - unprefixed
+      vars[`${nameUpper}_URL`] = url;
       vars['APP_URL'] = url;
     }
 
@@ -814,8 +836,10 @@ export function generateAppUrls(
 
       if (ws.framework === 'nextjs') {
         vars[`NEXT_PUBLIC_${otherNameUpper}_URL`] = otherUrl;
+        vars[`${otherNameUpper}_URL`] = otherUrl;  // Also add unprefixed for server
       } else if (ws.framework === 'vite') {
         vars[`VITE_${otherNameUpper}_URL`] = otherUrl;
+        vars[`${otherNameUpper}_URL`] = otherUrl;
       } else {
         vars[`${otherNameUpper}_URL`] = otherUrl;
       }
