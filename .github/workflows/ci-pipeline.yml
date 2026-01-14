@@ -8,6 +8,7 @@ permissions:
   contents: read
   pull-requests: write
   issues: read
+  checks: write
 
 concurrency:
   group: ci-${{ github.head_ref || github.ref_name }}
@@ -51,37 +52,24 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Get changed files
-        id: files
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh pr view ${{ github.event.pull_request.number }} --json files --jq '.files[].path' > /tmp/changed.txt
-          echo "Changed files:"
-          cat /tmp/changed.txt
-
-      - name: Run review
+      - name: Code Quality Review
         id: review
-        uses: anthropics/claude-code-base-action@main
+        uses: constellos/claude-code-actions/.github/actions/code-quality-reviewer@main
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          allowed_tools: "View,GlobTool,Grep,Bash(git diff:*)"
-          max_turns: 10
-          prompt: |
-            Review this PR. Changed files are listed in /tmp/changed.txt.
-            Provide a brief code quality assessment.
-            Output your findings as a summary.
+          pr_number: ${{ github.event.pull_request.number }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Post comment
+      - name: Post review comment
         if: always()
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh pr comment ${{ github.event.pull_request.number }} --body "## 📋 AI Review
-
-          Status: Completed
-
-          Review ran successfully.
-
-          ---
-          Claude Code CI"
+        uses: constellos/claude-code-actions/.github/actions/review-comment@main
+        with:
+          review_name: 'Code Quality'
+          passed: ${{ steps.review.outputs.passed }}
+          result_json: ${{ steps.review.outputs.result }}
+          checks_passed: ${{ steps.review.outputs.checks_passed }}
+          checks_failed: ${{ steps.review.outputs.checks_failed }}
+          checks_skipped: ${{ steps.review.outputs.checks_skipped }}
+          pr_number: ${{ github.event.pull_request.number }}
+          sha: ${{ github.sha }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
