@@ -98,6 +98,14 @@ function isRemoteEnvironment(): boolean {
 }
 
 /**
+ * Check if Docker is installed (not just running)
+ */
+async function isDockerInstalled(): Promise<boolean> {
+  const result = await execCommand('which docker', { timeout: 5000 });
+  return result.success && result.stdout.length > 0;
+}
+
+/**
  * Get Supabase CLI version
  */
 async function getSupabaseVersion(): Promise<string | null> {
@@ -1656,27 +1664,39 @@ async function handler(input: SessionStartInput): Promise<SessionStartHookOutput
     }
 
     // ========== Step 3: Check/Start Docker ==========
-    let dockerRunning = await isDockerRunning();
+    let dockerRunning = false;
+    let skipSupabase = false;
 
-    if (!dockerRunning) {
+    // Check if Docker is installed first
+    const dockerInstalled = await isDockerInstalled();
+    if (!dockerInstalled) {
       messages.push('');
-      messages.push('Docker not running, attempting to start...');
-      const started = await startDocker();
-
-      if (started) {
-        messages.push('Waiting for Docker to be ready...');
-        dockerRunning = await waitForDocker(30000);
-      }
+      messages.push('ℹ️ Docker not installed - skipping Supabase setup');
+      messages.push('  Install Docker: https://docker.com/products/docker-desktop');
+      skipSupabase = true;
+    } else {
+      dockerRunning = await isDockerRunning();
 
       if (!dockerRunning) {
-        messages.push('⚠️ Could not start Docker');
-        messages.push('  Please start Docker Desktop manually');
-        // Continue but note that Supabase won't start
+        messages.push('');
+        messages.push('Docker not running, attempting to start...');
+        const started = await startDocker();
+
+        if (started) {
+          messages.push('Waiting for Docker to be ready...');
+          dockerRunning = await waitForDocker(30000);
+        }
+
+        if (!dockerRunning) {
+          messages.push('⚠️ Could not start Docker');
+          messages.push('  Please start Docker Desktop manually');
+          skipSupabase = true;
+        } else {
+          messages.push('✓ Docker started');
+        }
       } else {
-        messages.push('✓ Docker started');
+        messages.push('✓ Docker running');
       }
-    } else {
-      messages.push('✓ Docker running');
     }
 
     // ========== Step 3.5: Clean up orphaned sessions ==========
@@ -1693,7 +1713,7 @@ async function handler(input: SessionStartInput): Promise<SessionStartHookOutput
     // Track tmp config directory for supabase status commands
     let supabaseTmpDir: string | undefined;
 
-    if (dockerRunning) {
+    if (dockerRunning && !skipSupabase) {
       if (instanceConfig.needsNewInstance) {
         // Start new Supabase instance (possibly with custom ports for worktree)
         messages.push('');
@@ -2005,18 +2025,59 @@ async function handler(input: SessionStartInput): Promise<SessionStartHookOutput
       if (projectType === 'turborepo') {
         const workspaces = detectTurborepoWorkspaces(input.cwd);
         if (workspaces && workspaces.length > 0) {
-          // For Turborepo: set PORT env vars for each workspace type
-          for (const ws of workspaces) {
-            const wsPath = join(input.cwd, ws);
-            const wsType = detectProjectType(wsPath);
-            if (wsType === 'nextjs') {
-              devServerEnvVars.PORT = String(availablePorts.nextjs);
-            } else if (wsType === 'vite') {
-              devServerEnvVars.VITE_PORT = String(availablePorts.vite);
-            } else if (wsType === 'cloudflare') {
-              devServerEnvVars.WRANGLER_DEV_PORT = String(availablePorts.cloudflare);
+          // Get workspace port info for per-app PORT variables
+          const workspacePorts = await detectWorkspacePorts(input.cwd, workspaces);
+
+          // Track used ports per framework to handle multiple apps of same type
+          const usedPortsByType: Record<string, number[]> = {
+            nextjs: [],
+            vite: [],
+            cloudflare: [],
+            elysia: [],
+          };
+
+          // For Turborepo: set PORT_{APP_NAME} env var for each app
+          for (const wp of workspacePorts) {
+            const wsName = basename(wp.workspace).toUpperCase().replace(/-/g, '_');
+
+            // Calculate port: configured > base + offset
+            let port: number;
+            if (wp.configuredPort !== null) {
+              port = wp.configuredPort;
+              // Apply worktree offset to configured ports
+              if (worktreeSlot > 0) {
+                port += worktreeSlot * PORT_INCREMENT;
+              }
+            } else {
+              // Use base port + offset for this framework type
+              const usedPorts = usedPortsByType[wp.projectType] || [];
+              const basePort = wp.defaultPort || availablePorts.nextjs;
+              port = basePort + (usedPorts.length * 10);
+              // Apply worktree offset
+              if (worktreeSlot > 0) {
+                port += worktreeSlot * PORT_INCREMENT;
+              }
+            }
+
+            // Track used ports
+            if (usedPortsByType[wp.projectType]) {
+              usedPortsByType[wp.projectType].push(port);
+            }
+
+            // Set per-app PORT variable
+            if (wp.projectType === 'nextjs' || wp.projectType === 'elysia') {
+              devServerEnvVars[`PORT_${wsName}`] = String(port);
+            } else if (wp.projectType === 'vite') {
+              devServerEnvVars[`VITE_PORT_${wsName}`] = String(port);
+            } else if (wp.projectType === 'cloudflare') {
+              devServerEnvVars[`WRANGLER_PORT_${wsName}`] = String(port);
             }
           }
+
+          // Also set legacy framework-level PORT for backwards compatibility
+          devServerEnvVars.PORT = String(availablePorts.nextjs + (worktreeSlot > 0 ? worktreeSlot * PORT_INCREMENT : 0));
+          devServerEnvVars.VITE_PORT = String(availablePorts.vite + (worktreeSlot > 0 ? worktreeSlot * PORT_INCREMENT : 0));
+          devServerEnvVars.WRANGLER_DEV_PORT = String(availablePorts.cloudflare + (worktreeSlot > 0 ? worktreeSlot * PORT_INCREMENT : 0));
         }
       } else {
         // For single-project: apply port based on project type

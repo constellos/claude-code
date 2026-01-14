@@ -7,3 +7,6 @@ dist/
 PLAN.md
 plugins/**/hooks/.claude/
 .worktrees/
+
+# nodes-md MCP config
+.nodes/
