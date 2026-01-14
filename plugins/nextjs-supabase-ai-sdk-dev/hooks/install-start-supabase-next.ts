@@ -17,7 +17,7 @@ import { detectPackageManager } from '../shared/hooks/utils/package-manager.js';
 import { isPortAvailable, findAvailablePort, killProcessOnPort, findAvailablePortAt10Increments } from '../shared/hooks/utils/port.js';
 import { getWranglerDevPort } from '../shared/hooks/utils/toml.js';
 import { findViteConfigPort } from '../shared/hooks/utils/vite-config.js';
-import { distributeEnvVars, mergeWorkspaceEnvVars, validateEnvVars, detectSupabaseUsage, hasSupabaseInMonorepo, generateAppUrls, detectWorkspaceFramework, type DevServerPorts, type WorkspaceInfo } from '../shared/hooks/utils/env-sync.js';
+import { distributeEnvVars, mergeWorkspaceEnvVars, validateEnvVars, detectSupabaseUsage, hasSupabaseInMonorepo, generateAppUrls, detectWorkspaceFramework, resolveWorkspacePorts, type DevServerPorts, type WorkspaceInfo } from '../shared/hooks/utils/env-sync.js';
 import { detectWorktree, type WorktreeInfo } from '../shared/hooks/utils/worktree.js';
 import {
   PORT_INCREMENT,
@@ -343,6 +343,10 @@ async function distributeAllEnvVars(
 
       workspaceInfos.push({ path: ws, name, framework, configuredPort });
     }
+
+    // Resolve ports (check availability and find alternatives at +10 increments)
+    // This ensures multiple Claude sessions can run in parallel without port conflicts
+    await resolveWorkspacePorts(workspaceInfos, devServerPorts);
 
     appUrlsByWorkspace = generateAppUrls(workspaceInfos, devServerPorts);
   }
