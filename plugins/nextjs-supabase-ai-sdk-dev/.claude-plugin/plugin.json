@@ -9,9 +9,9 @@
   "license": "MIT",
   "keywords": ["nextjs", "supabase", "ai-sdk", "development"],
   "mcpServers": {
-    "next-devtools": {
+    "nodes": {
       "command": "npx",
-      "args": ["-y", "next-devtools-mcp@latest"]
+      "args": ["-y", "nodes-md@latest"]
     },
     "ai-elements": {
       "command": "npx",
@@ -24,10 +24,6 @@
     "vercel": {
       "command": "npx",
       "args": ["-y", "mcp-remote@latest", "https://mcp.vercel.com"]
-    },
-    "shadcn": {
-      "command": "npx",
-      "args": ["shadcn@latest", "mcp"]
     }
   }
 }

@@ -17,9 +17,9 @@
     "claude-code"
   ],
   "mcpServers": {
-    "context7": {
+    "nodes": {
       "command": "npx",
-      "args": ["-y", "@upstash/context7-mcp@latest"]
+      "args": ["-y", "nodes-md@latest"]
     }
   }
 }

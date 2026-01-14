@@ -14,6 +14,11 @@
         "hooks": [
           {
             "type": "command",
+            "command": "npx tsx ${CLAUDE_PLUGIN_ROOT}/hooks/setup-nodes-config.ts",
+            "description": "Creates .nodes/.mcp.nodes.json config for the nodes-md MCP proxy"
+          },
+          {
+            "type": "command",
             "command": "npx tsx ${CLAUDE_PLUGIN_ROOT}/hooks/install-vercel.ts",
             "description": "Installs Vercel CLI on remote, warns if missing on local"
           },
