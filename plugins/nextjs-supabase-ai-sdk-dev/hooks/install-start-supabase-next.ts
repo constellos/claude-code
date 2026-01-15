@@ -768,7 +768,8 @@ function extractPortFromDevScript(packageJsonPath: string): number | null {
     }
 
     // Match --port XXXX or -p XXXX patterns
-    const portMatch = devScript.match(/(?:--port|-p)\s+(\d+)/);
+    // Also handles env var syntax: --port ${PORT_APP:-3100} -> extracts 3100
+    const portMatch = devScript.match(/(?:--port|-p)\s+(?:\$\{[^:]+:-)?(\d+)/);
     if (portMatch) {
       return parseInt(portMatch[1], 10);
     }
