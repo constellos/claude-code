@@ -627,6 +627,48 @@ function detectProjectType(cwd: string): ProjectType {
 }
 
 /**
+ * Ensure turbo.json has PORT_* patterns in globalPassThroughEnv
+ * Turborepo filters out env vars not listed in globalPassThroughEnv,
+ * so we need to add PORT_*, VITE_PORT_*, and WRANGLER_PORT_* patterns.
+ * Uses skip-worktree to prevent committing this change.
+ */
+async function ensureTurboEnvPassthrough(cwd: string, messages: string[]): Promise<void> {
+  const turboJsonPath = join(cwd, 'turbo.json');
+  if (!existsSync(turboJsonPath)) {
+    return;
+  }
+
+  try {
+    const content = readFileSync(turboJsonPath, 'utf-8');
+    const turboConfig = JSON.parse(content);
+
+    const requiredPatterns = ['PORT_*', 'VITE_PORT_*', 'WRANGLER_PORT_*'];
+    const existing: string[] = turboConfig.globalPassThroughEnv || [];
+
+    const missing = requiredPatterns.filter(p => !existing.includes(p));
+    if (missing.length === 0) {
+      return; // Already has all required patterns
+    }
+
+    turboConfig.globalPassThroughEnv = [...existing, ...missing];
+    writeFileSync(turboJsonPath, JSON.stringify(turboConfig, null, 2) + '\n');
+
+    // Use skip-worktree to prevent committing this change
+    const skipResult = await execCommand(`git update-index --skip-worktree "${turboJsonPath}"`);
+    if (skipResult.success) {
+      messages.push(`✓ Added ${missing.join(', ')} to turbo.json globalPassThroughEnv`);
+      messages.push(`  git skip-worktree set (changes won't be committed)`);
+    } else {
+      // Rollback if skip-worktree failed
+      writeFileSync(turboJsonPath, content);
+      messages.push(`⚠️ Could not set skip-worktree for turbo.json`);
+    }
+  } catch (error) {
+    messages.push(`⚠️ Could not update turbo.json: ${error}`);
+  }
+}
+
+/**
  * Modified package.json info for cleanup tracking
  */
 interface ModifiedPackageJson {
@@ -2098,11 +2140,16 @@ async function handler(input: SessionStartInput): Promise<SessionStartHookOutput
         }
       }
 
-      // For Turborepo: modify package.json dev scripts to use PORT env vars
+      // For Turborepo: modify turbo.json and package.json for dynamic port assignment
       // This must happen BEFORE starting the dev server
       if (projectType === 'turborepo') {
         const workspacesForPortMod = detectTurborepoWorkspaces(input.cwd);
         if (workspacesForPortMod && workspacesForPortMod.length > 0) {
+          // First, ensure turbo.json has PORT_* patterns in globalPassThroughEnv
+          // This is required for Turborepo to pass PORT_APP, PORT_WEB etc. to workspaces
+          await ensureTurboEnvPassthrough(input.cwd, messages);
+
+          // Then modify package.json dev scripts to use PORT env vars
           const modifiedPkgs = await modifyPackageJsonForDynamicPorts(
             input.cwd,
             workspacesForPortMod,
