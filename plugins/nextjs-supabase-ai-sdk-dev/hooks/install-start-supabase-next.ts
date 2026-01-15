@@ -627,6 +627,89 @@ function detectProjectType(cwd: string): ProjectType {
 }
 
 /**
+ * Modified package.json info for cleanup tracking
+ */
+interface ModifiedPackageJson {
+  path: string;
+  originalDevScript: string;
+}
+
+/**
+ * Modify package.json dev scripts to use PORT env vars
+ * This allows the hook to control ports via environment variables instead of hardcoded values.
+ * Uses git skip-worktree to prevent these local changes from being committed.
+ *
+ * @param cwd - Root directory of the project
+ * @param workspaces - Array of workspace paths relative to cwd
+ * @param messages - Array to push status messages to
+ * @returns Array of modified package.json paths for cleanup tracking
+ */
+async function modifyPackageJsonForDynamicPorts(
+  cwd: string,
+  workspaces: string[],
+  messages: string[]
+): Promise<ModifiedPackageJson[]> {
+  const modified: ModifiedPackageJson[] = [];
+
+  for (const ws of workspaces) {
+    const pkgPath = join(cwd, ws, 'package.json');
+    if (!existsSync(pkgPath)) {
+      continue;
+    }
+
+    try {
+      const pkgContent = readFileSync(pkgPath, 'utf-8');
+      const pkg = JSON.parse(pkgContent);
+
+      if (!pkg.scripts?.dev) {
+        continue;
+      }
+
+      const devScript = pkg.scripts.dev;
+      // Match --port XXXX or -p XXXX patterns (but not already using env vars)
+      const portMatch = devScript.match(/(?:--port|-p)\s+(\d+)/);
+
+      // Skip if already using env var pattern like ${PORT_WEB:-3000}
+      if (!portMatch || devScript.includes('${PORT_')) {
+        continue;
+      }
+
+      const originalPort = portMatch[1];
+      const wsName = basename(ws).toUpperCase().replace(/-/g, '_');
+
+      // Replace --port XXXX with --port ${PORT_WSNAME:-XXXX}
+      // This allows PORT_WEB, PORT_APP etc. env vars to override
+      const newDevScript = devScript.replace(
+        /(?:--port|-p)\s+\d+/,
+        `--port \${PORT_${wsName}:-${originalPort}}`
+      );
+
+      pkg.scripts.dev = newDevScript;
+
+      // Write modified package.json
+      writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
+
+      // Mark file as skip-worktree so git ignores changes
+      // This prevents the port modifications from being committed
+      const skipResult = await execCommand(`git update-index --skip-worktree "${pkgPath}"`);
+      if (skipResult.success) {
+        modified.push({ path: pkgPath, originalDevScript: devScript });
+        messages.push(`✓ Modified ${ws}/package.json to use PORT_${wsName} env var`);
+        messages.push(`  git skip-worktree set (changes won't be committed)`);
+      } else {
+        // Rollback if skip-worktree failed
+        writeFileSync(pkgPath, pkgContent);
+        messages.push(`⚠️ Could not set skip-worktree for ${ws}/package.json`);
+      }
+    } catch (error) {
+      messages.push(`⚠️ Failed to modify ${ws}/package.json: ${error}`);
+    }
+  }
+
+  return modified;
+}
+
+/**
  * Extract port from package.json dev script
  * Looks for patterns like "--port 3002" or "-p 3200"
  */
@@ -2010,6 +2093,37 @@ async function handler(input: SessionStartInput): Promise<SessionStartHookOutput
                   messages.push('⚠️ Could not start MCP worker');
                 }
               }
+            }
+          }
+        }
+      }
+
+      // For Turborepo: modify package.json dev scripts to use PORT env vars
+      // This must happen BEFORE starting the dev server
+      if (projectType === 'turborepo') {
+        const workspacesForPortMod = detectTurborepoWorkspaces(input.cwd);
+        if (workspacesForPortMod && workspacesForPortMod.length > 0) {
+          const modifiedPkgs = await modifyPackageJsonForDynamicPorts(
+            input.cwd,
+            workspacesForPortMod,
+            messages
+          );
+
+          // Track modified package.json files in session state for manual cleanup reference
+          if (modifiedPkgs.length > 0) {
+            const modifiedPkgJsonPath = join(input.cwd, '.claude', 'logs', 'modified-package-jsons.json');
+            try {
+              writeFileSync(modifiedPkgJsonPath, JSON.stringify({
+                modified: modifiedPkgs,
+                savedAt: new Date().toISOString(),
+                cleanupInstructions: [
+                  'To restore original package.json files:',
+                  '1. git update-index --no-skip-worktree <path>',
+                  '2. git checkout <path>',
+                ],
+              }, null, 2));
+            } catch {
+              // Best effort - don't fail if we can't save the tracking file
             }
           }
         }
