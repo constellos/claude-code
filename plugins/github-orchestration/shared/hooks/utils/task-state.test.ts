@@ -239,6 +239,54 @@ This agent has no frontmatter.
     });
   });
 
+  describe('Parent transcript path resolution (PR #312 fix)', () => {
+    it('should correctly resolve parent path from subagents folder', () => {
+      // Test the path calculation logic used in getTaskEdits
+      // Agent transcripts are at: .../project/{sessionId}/subagents/agent-{agentId}.jsonl
+      // Parent transcripts are at: .../project/{sessionId}.jsonl
+
+      const agentTranscriptPath = '/home/user/.claude/projects/myproject/abc123-session/subagents/agent-xyz789.jsonl';
+      const sessionId = 'abc123-session';
+
+      // Simulate the path resolution logic from task-state.ts:341-346
+      let dir = path.dirname(agentTranscriptPath); // .../abc123-session/subagents/
+      expect(dir).toBe('/home/user/.claude/projects/myproject/abc123-session/subagents');
+
+      if (path.basename(dir) === 'subagents') {
+        dir = path.dirname(dir); // .../abc123-session/
+      }
+      expect(dir).toBe('/home/user/.claude/projects/myproject/abc123-session');
+
+      dir = path.dirname(dir); // .../myproject/
+      expect(dir).toBe('/home/user/.claude/projects/myproject');
+
+      const parentPath = path.join(dir, `${sessionId}.jsonl`);
+      expect(parentPath).toBe('/home/user/.claude/projects/myproject/abc123-session.jsonl');
+    });
+
+    it('should correctly resolve parent path from legacy direct folder', () => {
+      // Legacy case: agent transcript not in subagents folder
+      const agentTranscriptPath = '/home/user/.claude/projects/myproject/abc123-session/agent-xyz789.jsonl';
+      const sessionId = 'abc123-session';
+
+      // Simulate the path resolution logic from task-state.ts:341-346
+      let dir = path.dirname(agentTranscriptPath); // .../abc123-session/
+      expect(dir).toBe('/home/user/.claude/projects/myproject/abc123-session');
+
+      if (path.basename(dir) === 'subagents') {
+        dir = path.dirname(dir);
+      }
+      // No change since dir is not 'subagents'
+      expect(dir).toBe('/home/user/.claude/projects/myproject/abc123-session');
+
+      dir = path.dirname(dir); // .../myproject/
+      expect(dir).toBe('/home/user/.claude/projects/myproject');
+
+      const parentPath = path.join(dir, `${sessionId}.jsonl`);
+      expect(parentPath).toBe('/home/user/.claude/projects/myproject/abc123-session.jsonl');
+    });
+  });
+
   describe('Full workflow integration', () => {
     it('should save, load, and remove context in sequence', async () => {
       // Save
