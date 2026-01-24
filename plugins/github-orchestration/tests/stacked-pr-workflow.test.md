@@ -29,4 +29,63 @@
 
 ## Results
 
-_To be filled after test execution_
+### Test Run 1 (07:33 UTC)
+- **Subissue #313** ✅ Created with labels `task`, `subissue`
+- **Native sub-issue API** ❌ Returns `[]` (using markdown fallback)
+- **Stacked branch** ❌ Not created (no active PR detected yet)
+
+### Test Run 2 (07:35 UTC)
+- **Subissue #315** ✅ Created with labels `task`, `subissue`
+- **Stacked branch** ✅ Created: `311-fix/can-u-test-out-the-gh-orchestration-plug-subagent-a18c360`
+- **Stacked PR** ❌ Failed - Bug in `getTaskEdits()` (wrong parent transcript path)
+- **Branch cleanup** ✅ Ran (deleted branch due to error)
+
+### Bug Found
+**File**: `plugins/github-orchestration/shared/hooks/utils/task-state.ts:340`
+
+**Issue**: `getTaskEdits()` constructs wrong path for parent transcript
+- Agent transcript: `.../project/{sessionId}/subagents/agent-{agentId}.jsonl`
+- Code looked for: `.../project/{sessionId}/subagents/{sessionId}.jsonl` ❌
+- Should look for: `.../project/{sessionId}.jsonl` ✅
+
+**Fix Applied**: Go up two directory levels from agent transcript path
+
+### Test Run 3 (07:38 UTC)
+- **Subissue #316** ✅ Created with labels `task`, `subissue`
+- **Stacked branch** ✅ Created but cleaned up due to error
+- **Stacked PR** ❌ Still failing (fix not in plugin cache yet)
+- **Note**: Fix applied to source but hooks run from `~/.claude/plugins/cache/constellos-local/`
+
+## Summary
+
+| Hook | Status | Notes |
+|------|--------|-------|
+| `sync-task-to-subissue.ts` | ✅ Working | Creates subissues linked to parent |
+| `create-subagent-branch.ts` | ✅ Working | Creates branch when PR exists |
+| `stacked-pr-subagent-stop.ts` | ❌ Bug | Path calculation error - fixed in source |
+
+### Issues Created During Test
+- #313, #315, #316 - All linked to parent #311
+
+### PRs Created
+- #312 - Main PR (this branch → main)
+- No stacked PRs (blocked by bug)
+
+### Fix Required
+File: `plugins/github-orchestration/shared/hooks/utils/task-state.ts`
+
+Before:
+```typescript
+const dir = path.dirname(agentTranscriptPath);
+const parentPath = path.join(dir, `${sessionId}.jsonl`);
+```
+
+After:
+```typescript
+let dir = path.dirname(agentTranscriptPath);
+if (path.basename(dir) === 'subagents') {
+  dir = path.dirname(dir);
+}
+dir = path.dirname(dir);
+const parentPath = path.join(dir, `${sessionId}.jsonl`);
+```
