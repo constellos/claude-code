@@ -142,3 +142,16 @@ export {
   formatErrorSummary,
   formatSuccessMessage,
 } from './log-file.js';
+
+// ============================================================================
+// Rules Matching
+// ============================================================================
+// Discover rules files and match them against edited files based on
+// glob patterns in frontmatter.
+
+export {
+  discoverRules,
+  matchRulesToFiles,
+  formatRulesContext,
+  type RuleFile,
+} from './rules-matcher.js';
