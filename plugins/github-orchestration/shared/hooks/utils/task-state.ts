@@ -336,7 +336,13 @@ export async function getTaskEdits(
   }
 
   // Find parent session transcript
-  const dir = path.dirname(agentTranscriptPath);
+  // Agent transcripts are at: .../project/{sessionId}/subagents/agent-{agentId}.jsonl
+  // Parent transcripts are at: .../project/{sessionId}.jsonl
+  let dir = path.dirname(agentTranscriptPath); // .../sessionId/subagents/
+  if (path.basename(dir) === 'subagents') {
+    dir = path.dirname(dir); // .../sessionId/
+  }
+  dir = path.dirname(dir); // .../project/
   const parentPath = path.join(dir, `${sessionId}.jsonl`);
 
   try {
