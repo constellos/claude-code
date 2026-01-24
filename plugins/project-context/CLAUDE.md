@@ -28,6 +28,8 @@ Automatic CLAUDE.md discovery, .claude structure validation, and rule-based chec
 | log-task-result | PostToolUse[Task] | No | Logs task results |
 | track-task-scope | PostToolUse[Write\|Edit] | No | Advisory when file outside task scope |
 | add-folder-context | PostToolUse[Read] | No | Discovers CLAUDE.md files |
+| review-subagent-completion | SubagentStop | Yes* | Reviews subagent work, blocks Plan without plan file |
+| session-stop-review | Stop | Yes | Prompt-based review of session completion |
 
 ## Skills
 
