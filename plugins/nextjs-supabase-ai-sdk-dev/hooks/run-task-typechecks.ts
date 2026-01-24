@@ -50,7 +50,8 @@ function hasTypeScriptFiles(files: string[]): boolean {
 /**
  * SubagentStop hook handler
  *
- * Runs tsc --noEmit on the project. Blocks if typecheck fails.
+ * Runs tsc --noEmit on the project if TypeScript files were edited.
+ * Blocks if typecheck fails.
  */
 async function handler(input: SubagentStopInput): Promise<SubagentStopHookOutput> {
   const DEBUG = process.env.DEBUG === '*' || process.env.DEBUG?.includes('task-typechecks');
@@ -60,66 +61,78 @@ async function handler(input: SubagentStopInput): Promise<SubagentStopHookOutput
     console.log('[run-task-typechecks] Agent ID:', input.agent_id);
   }
 
+  // Get all files edited by the agent
+  let allEditedFiles: string[];
   try {
-    // Get all files edited by the agent
     const edits = await getAgentEdits(input.agent_transcript_path);
-    const allEditedFiles = [...edits.agentNewFiles, ...edits.agentEditedFiles];
-
-    if (DEBUG) {
-      console.log('[run-task-typechecks] Edited files:', allEditedFiles.length);
-    }
-
-    // Only run typecheck if TypeScript files were edited
-    if (!hasTypeScriptFiles(allEditedFiles)) {
-      if (DEBUG) {
-        console.log('[run-task-typechecks] No TypeScript files edited, skipping');
-      }
-      return {};
-    }
-
-    // Find tsconfig.json
-    const tsconfigDir = await findConfigFile(input.cwd, 'tsconfig.json');
-
-    if (!tsconfigDir) {
-      // No tsconfig.json found - skip with warning (per user preference)
-      if (DEBUG) {
-        console.warn(`[run-task-typechecks] TypeScript configuration (tsconfig.json) not found. Searched from ${input.cwd} to git root. Skipping type check.`);
-      }
-      return {};
-    }
-
-    // Run tsc --noEmit on the project
-    const command = 'npx tsc --noEmit';
-
-    if (DEBUG) {
-      console.log('[run-task-typechecks] Running:', command);
-      console.log('[run-task-typechecks] Config dir:', tsconfigDir);
-    }
-
-    try {
-      await execAsync(command, {
-        cwd: tsconfigDir,
-        timeout: TIMEOUT_MS,
-      });
-
-      // Typecheck passed
-      return {};
-    } catch (error) {
-      // Typecheck failed
-      const err = error as { stdout?: string; stderr?: string; message?: string };
-      const output = err.stdout || err.stderr || err.message || 'TypeScript check failed';
-
-      return {
-        decision: 'block',
-        reason: `Fix TypeScript errors before continuing:\n\n${truncateOutput(output)}`,
-      };
-    }
+    allEditedFiles = [...edits.agentNewFiles, ...edits.agentEditedFiles];
   } catch (error) {
+    // Transcript parsing failed - provide visibility instead of silent failure
+    const err = error as Error;
+    const warning = `⚠️ TypeScript check skipped: Could not parse agent transcript (${err.message})`;
     if (DEBUG) {
-      console.error('[run-task-typechecks] Error:', error);
+      console.error('[run-task-typechecks] Error parsing transcript:', error);
     }
-    // Don't block on transcript parsing errors
-    return {};
+    return {
+      systemMessage: warning,
+    };
+  }
+
+  if (DEBUG) {
+    console.log('[run-task-typechecks] Edited files:', allEditedFiles.length);
+  }
+
+  // Only run typecheck if TypeScript files were edited
+  if (!hasTypeScriptFiles(allEditedFiles)) {
+    if (DEBUG) {
+      console.log('[run-task-typechecks] No TypeScript files edited, skipping');
+    }
+    return {
+      systemMessage: '✓ TypeScript check skipped (no .ts/.tsx files edited)',
+    };
+  }
+
+  // Find tsconfig.json
+  const tsconfigDir = await findConfigFile(input.cwd, 'tsconfig.json');
+
+  if (!tsconfigDir) {
+    // No tsconfig.json found - skip with warning visible in systemMessage
+    const warning = `⚠️ TypeScript check skipped: tsconfig.json not found (searched from ${input.cwd})`;
+    if (DEBUG) {
+      console.warn(`[run-task-typechecks] ${warning}`);
+    }
+    return {
+      systemMessage: warning,
+    };
+  }
+
+  // Run tsc --noEmit on the project
+  const command = 'npx tsc --noEmit';
+
+  if (DEBUG) {
+    console.log('[run-task-typechecks] Running:', command);
+    console.log('[run-task-typechecks] Config dir:', tsconfigDir);
+  }
+
+  try {
+    await execAsync(command, {
+      cwd: tsconfigDir,
+      timeout: TIMEOUT_MS,
+    });
+
+    // Typecheck passed - provide visibility
+    return {
+      systemMessage: '✓ TypeScript check passed',
+    };
+  } catch (error) {
+    // Typecheck failed
+    const err = error as { stdout?: string; stderr?: string; message?: string };
+    const output = err.stdout || err.stderr || err.message || 'TypeScript check failed';
+
+    return {
+      decision: 'block',
+      reason: `Fix TypeScript errors before continuing:\n\n${truncateOutput(output)}`,
+    };
   }
 }
 
