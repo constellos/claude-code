@@ -30,7 +30,7 @@
  * - `acceptEdits`: Automatically accept all edit operations
  * - `bypassPermissions`: Bypass all permission checks
  */
-export type PermissionMode = "default" | "plan" | "acceptEdits" | "bypassPermissions";
+export type PermissionMode = "default" | "plan" | "acceptEdits" | "dontAsk" | "bypassPermissions";
 
 // ============================================================================
 // Hook Event Names
@@ -41,7 +41,8 @@ export type PermissionMode = "default" | "plan" | "acceptEdits" | "bypassPermiss
  *
  * Hook events fire at specific points during Claude Code execution:
  * - `PreToolUse`: Before a tool is executed (can modify or block)
- * - `PostToolUse`: After a tool completes (can add context or block)
+ * - `PostToolUse`: After a tool completes successfully (can add context or block)
+ * - `PostToolUseFailure`: After a tool fails (can add context or modify error handling)
  * - `Notification`: When Claude sends a notification
  * - `UserPromptSubmit`: When user submits a prompt (can add context or block)
  * - `Stop`: When execution is stopping (can block the stop)
@@ -50,10 +51,13 @@ export type PermissionMode = "default" | "plan" | "acceptEdits" | "bypassPermiss
  * - `PreCompact`: Before transcript compaction occurs
  * - `SessionStart`: When a new session starts
  * - `SessionEnd`: When a session ends
+ * - `Setup`: When repository is initialized or maintenance runs
+ * - `PermissionRequest`: When permission dialog is shown to user
  */
 export type HookEventName =
   | "PreToolUse"
   | "PostToolUse"
+  | "PostToolUseFailure"
   | "Notification"
   | "UserPromptSubmit"
   | "Stop"
@@ -61,7 +65,9 @@ export type HookEventName =
   | "SubagentStop"
   | "PreCompact"
   | "SessionStart"
-  | "SessionEnd";
+  | "SessionEnd"
+  | "Setup"
+  | "PermissionRequest";
 
 // ============================================================================
 // Base Hook Input/Output
@@ -142,6 +148,8 @@ export type PreToolUseHookOutput = BaseHookOutput & {
         permissionDecisionReason?: string;
         /** Optional modified tool input parameters */
         updatedInput?: Record<string, unknown>;
+        /** Additional context to provide to Claude */
+        additionalContext?: string;
       }
     | {
         hookEventName: "PreToolUse";
@@ -328,6 +336,44 @@ export interface TaskToolInput {
   resume?: string;
 }
 
+/** Input for WebFetch tool - fetches and processes web content */
+export interface WebFetchToolInput {
+  url: string;
+  prompt: string;
+}
+
+/** Input for WebSearch tool - searches the web */
+export interface WebSearchToolInput {
+  query: string;
+  allowed_domains?: string[];
+  blocked_domains?: string[];
+}
+
+/** Input for NotebookEdit tool - edits Jupyter notebook cells */
+export interface NotebookEditToolInput {
+  notebook_path: string;
+  new_source: string;
+  cell_id?: string;
+  cell_type?: "code" | "markdown";
+  edit_mode?: "replace" | "insert" | "delete";
+}
+
+/** Input for AskUserQuestion tool - asks user questions with options */
+export interface AskUserQuestionToolInput {
+  questions: Array<{
+    question: string;
+    header: string;
+    options: Array<{ label: string; description: string }>;
+    multiSelect: boolean;
+  }>;
+}
+
+/** Input for Skill tool - invokes a skill */
+export interface SkillToolInput {
+  skill: string;
+  args?: string;
+}
+
 /**
  * Type-safe PostToolUse input with discriminated union for tool types
  *
@@ -393,6 +439,41 @@ export type PostToolUseInputTyped =
       tool_use_id: string;
       tool_name: "Task";
       tool_input: TaskToolInput;
+      tool_response: unknown;
+    })
+  | (BaseHookInput & {
+      hook_event_name: "PostToolUse";
+      tool_use_id: string;
+      tool_name: "WebFetch";
+      tool_input: WebFetchToolInput;
+      tool_response: unknown;
+    })
+  | (BaseHookInput & {
+      hook_event_name: "PostToolUse";
+      tool_use_id: string;
+      tool_name: "WebSearch";
+      tool_input: WebSearchToolInput;
+      tool_response: unknown;
+    })
+  | (BaseHookInput & {
+      hook_event_name: "PostToolUse";
+      tool_use_id: string;
+      tool_name: "NotebookEdit";
+      tool_input: NotebookEditToolInput;
+      tool_response: unknown;
+    })
+  | (BaseHookInput & {
+      hook_event_name: "PostToolUse";
+      tool_use_id: string;
+      tool_name: "AskUserQuestion";
+      tool_input: AskUserQuestionToolInput;
+      tool_response: unknown;
+    })
+  | (BaseHookInput & {
+      hook_event_name: "PostToolUse";
+      tool_use_id: string;
+      tool_name: "Skill";
+      tool_input: SkillToolInput;
       tool_response: unknown;
     })
   | PostToolUseInput; // Fallback for other tools
@@ -468,6 +549,36 @@ export type PreToolUseInputTyped =
       tool_name: "Task";
       tool_input: TaskToolInput;
     })
+  | (BaseHookInput & {
+      hook_event_name: "PreToolUse";
+      tool_use_id: string;
+      tool_name: "WebFetch";
+      tool_input: WebFetchToolInput;
+    })
+  | (BaseHookInput & {
+      hook_event_name: "PreToolUse";
+      tool_use_id: string;
+      tool_name: "WebSearch";
+      tool_input: WebSearchToolInput;
+    })
+  | (BaseHookInput & {
+      hook_event_name: "PreToolUse";
+      tool_use_id: string;
+      tool_name: "NotebookEdit";
+      tool_input: NotebookEditToolInput;
+    })
+  | (BaseHookInput & {
+      hook_event_name: "PreToolUse";
+      tool_use_id: string;
+      tool_name: "AskUserQuestion";
+      tool_input: AskUserQuestionToolInput;
+    })
+  | (BaseHookInput & {
+      hook_event_name: "PreToolUse";
+      tool_use_id: string;
+      tool_name: "Skill";
+      tool_input: SkillToolInput;
+    })
   | PreToolUseInput; // Fallback for other tools
 
 /**
@@ -497,6 +608,10 @@ export interface SessionStartInput extends BaseHookInput {
   hook_event_name: "SessionStart";
   /** How the session was started */
   source: SessionStartSource;
+  /** Model being used for this session (e.g., "claude-sonnet-4-20250514") */
+  model?: string;
+  /** Type of agent running (e.g., "main", "Explore", "Plan") */
+  agent_type?: string;
 }
 
 /**
@@ -771,6 +886,121 @@ export type PreCompactHook = (
 ) => PreCompactHookOutput | Promise<PreCompactHookOutput>;
 
 // ============================================================================
+// PostToolUseFailure Hook
+// ============================================================================
+
+/**
+ * Input provided to PostToolUseFailure hooks
+ *
+ * Fired after a tool fails execution, allowing hooks to inspect the error,
+ * add additional context, or modify error handling behavior.
+ */
+export interface PostToolUseFailureInput extends BaseHookInput {
+  /** Hook event name (always "PostToolUseFailure") */
+  hook_event_name: "PostToolUseFailure";
+  /** Unique ID for this tool use */
+  tool_use_id: string;
+  /** Name of the tool that failed */
+  tool_name: string;
+  /** Input parameters that were passed to the tool */
+  tool_input: unknown;
+  /** Error message from the failed tool */
+  error: string;
+}
+
+/**
+ * Output from PostToolUseFailure hooks
+ *
+ * Can add additional context for Claude about the failure or modify error handling.
+ */
+export type PostToolUseFailureHookOutput = BaseHookOutput & {
+  hookSpecificOutput?: {
+    hookEventName: "PostToolUseFailure";
+    /** Additional context to provide to Claude about the failure */
+    additionalContext?: string;
+  };
+};
+
+/** PostToolUseFailure hook function signature */
+export type PostToolUseFailureHook = (
+  input: PostToolUseFailureInput
+) => PostToolUseFailureHookOutput | Promise<PostToolUseFailureHookOutput>;
+
+// ============================================================================
+// Setup Hook
+// ============================================================================
+
+/** What triggered the Setup hook */
+export type SetupTrigger = "init" | "maintenance";
+
+/**
+ * Input provided to Setup hooks
+ *
+ * Fired when a repository is initialized or during maintenance operations.
+ */
+export interface SetupInput extends BaseHookInput {
+  /** Hook event name (always "Setup") */
+  hook_event_name: "Setup";
+  /** What triggered the setup: "init" for first-time setup, "maintenance" for periodic maintenance */
+  trigger: SetupTrigger;
+}
+
+/**
+ * Output from Setup hooks
+ *
+ * Can provide context about setup operations or block execution.
+ */
+export type SetupHookOutput = BaseHookOutput & {
+  hookSpecificOutput?: {
+    hookEventName: "Setup";
+    /** Additional context to provide to Claude about setup */
+    additionalContext?: string;
+  };
+};
+
+/** Setup hook function signature */
+export type SetupHook = (input: SetupInput) => SetupHookOutput | Promise<SetupHookOutput>;
+
+// ============================================================================
+// PermissionRequest Hook
+// ============================================================================
+
+/**
+ * Input provided to PermissionRequest hooks
+ *
+ * Fired when a permission dialog is shown to the user, allowing hooks
+ * to inspect or modify permission handling behavior.
+ */
+export interface PermissionRequestInput extends BaseHookInput {
+  /** Hook event name (always "PermissionRequest") */
+  hook_event_name: "PermissionRequest";
+  /** Unique ID for the tool use requesting permission */
+  tool_use_id: string;
+  /** Name of the tool requesting permission */
+  tool_name: string;
+  /** Input parameters for the tool requesting permission */
+  tool_input: unknown;
+}
+
+/**
+ * Output from PermissionRequest hooks
+ *
+ * Can modify how permission requests are handled.
+ */
+export type PermissionRequestHookOutput = BaseHookOutput & {
+  hookSpecificOutput?: {
+    hookEventName: "PermissionRequest";
+    /** Additional context to provide about the permission request */
+    additionalContext?: string;
+  };
+};
+
+/** PermissionRequest hook function signature */
+export type PermissionRequestHook = (
+  input: PermissionRequestInput
+) => PermissionRequestHookOutput | Promise<PermissionRequestHookOutput>;
+
+// ============================================================================
 // Hook Input/Output Union Types
 // ============================================================================
 
@@ -782,6 +1012,7 @@ export type PreCompactHook = (
 export type HookInput =
   | PreToolUseInput
   | PostToolUseInput
+  | PostToolUseFailureInput
   | SessionStartInput
   | SessionEndInput
   | SubagentStartInput
@@ -789,7 +1020,9 @@ export type HookInput =
   | NotificationInput
   | UserPromptSubmitInput
   | StopInput
-  | PreCompactInput;
+  | PreCompactInput
+  | SetupInput
+  | PermissionRequestInput;
 
 /**
  * Union of all possible hook output types
@@ -799,6 +1032,7 @@ export type HookInput =
 export type HookOutput =
   | PreToolUseHookOutput
   | PostToolUseHookOutput
+  | PostToolUseFailureHookOutput
   | SessionStartHookOutput
   | SessionEndHookOutput
   | SubagentStartHookOutput
@@ -806,7 +1040,9 @@ export type HookOutput =
   | NotificationHookOutput
   | UserPromptSubmitHookOutput
   | StopHookOutput
-  | PreCompactHookOutput;
+  | PreCompactHookOutput
+  | SetupHookOutput
+  | PermissionRequestHookOutput;
 
 // ============================================================================
 // Hook Function Type
