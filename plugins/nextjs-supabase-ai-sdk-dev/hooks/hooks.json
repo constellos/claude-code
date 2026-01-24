@@ -60,12 +60,54 @@
     ],
     "PostToolUse": [
       {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx tsx ${CLAUDE_PLUGIN_ROOT}/hooks/run-file-eslint.ts",
+            "description": "Runs ESLint on edited .ts/.tsx/.js/.jsx files. Blocking on errors."
+          },
+          {
+            "type": "command",
+            "command": "npx tsx ${CLAUDE_PLUGIN_ROOT}/hooks/run-file-vitests.ts",
+            "description": "Runs related vitest tests for edited files. Non-blocking (warns only)."
+          }
+        ]
+      },
+      {
         "matcher": "browser_eval",
         "hooks": [
           {
             "type": "command",
             "command": "npx tsx ${CLAUDE_PLUGIN_ROOT}/hooks/move-playwright-screenshots.ts",
             "description": "Moves screenshots to .claude/screenshots/ to prevent permission prompts"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx tsx ${CLAUDE_PLUGIN_ROOT}/hooks/run-task-vitests.ts",
+            "description": "Runs vitest for all files edited during agent's task. Blocking on failure."
+          },
+          {
+            "type": "command",
+            "command": "npx tsx ${CLAUDE_PLUGIN_ROOT}/hooks/run-task-typechecks.ts",
+            "description": "Runs tsc --noEmit after agent completes. Blocking on type errors."
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx tsx ${CLAUDE_PLUGIN_ROOT}/hooks/run-session-typechecks.ts",
+            "description": "Runs tsc --noEmit before session stops. Blocking on type errors."
           }
         ]
       }

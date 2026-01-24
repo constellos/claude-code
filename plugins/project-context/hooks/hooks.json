@@ -87,36 +87,10 @@
       ]
     }
   ],
-  "SubagentStop": [
-    {
-      "hooks": [
-        {
-          "type": "command",
-          "command": "npx tsx ${CLAUDE_PLUGIN_ROOT}/hooks/run-task-vitests.ts",
-          "description": "Runs vitest for all files edited during the agent's task. Blocking on failure, 500 char limit."
-        },
-        {
-          "type": "command",
-          "command": "npx tsx ${CLAUDE_PLUGIN_ROOT}/hooks/run-task-typechecks.ts",
-          "description": "Runs tsc --noEmit after agent completes. Blocking on type errors, 500 char limit."
-        }
-      ]
-    }
-  ],
   "PostToolUse": [
     {
       "matcher": "Write|Edit",
       "hooks": [
-        {
-          "type": "command",
-          "command": "npx tsx ${CLAUDE_PLUGIN_ROOT}/hooks/run-file-eslint.ts",
-          "description": "Runs ESLint on edited .ts/.tsx/.js/.jsx files. Blocking on errors, 500 char limit."
-        },
-        {
-          "type": "command",
-          "command": "npx tsx ${CLAUDE_PLUGIN_ROOT}/hooks/run-file-vitests.ts",
-          "description": "Runs related vitest tests for edited files. Non-blocking (warns only), 500 char limit."
-        },
         {
           "type": "command",
           "command": "npx tsx ${CLAUDE_PLUGIN_ROOT}/hooks/track-task-scope.ts",

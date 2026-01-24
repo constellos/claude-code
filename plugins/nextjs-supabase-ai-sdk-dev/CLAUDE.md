@@ -22,7 +22,12 @@ Local dev environment setup for Vercel/Supabase and systematic UI development wi
 | install-vercel | SessionStart | No | Installs Vercel CLI |
 | install-start-supabase-next | SessionStart | No | Sets up Supabase local dev, installs dependencies (skips if fresh), starts dev servers (Next.js, Cloudflare, Elysia, Turborepo) with health checks |
 | cache-supabase-schema | SessionStart | No | Caches Supabase table/column metadata for context matching |
+| run-file-eslint | PostToolUse[Write\|Edit] | Yes | Runs ESLint on edited files |
+| run-file-vitests | PostToolUse[Write\|Edit] | No | Runs related tests (warns only) |
 | move-playwright-screenshots | PostToolUse[browser_eval] | No | Moves screenshots to .claude/screenshots/ to prevent permission prompts |
+| run-task-vitests | SubagentStop | Yes | Runs tests for all task edits |
+| run-task-typechecks | SubagentStop | Yes | Runs tsc --noEmit after task |
+| run-session-typechecks | Stop | Yes | Runs tsc --noEmit before session stops |
 | cleanup-supabase-session | SessionEnd | No | Stops Supabase containers, restores config.toml, marks session stopped |
 
 ## Agents
