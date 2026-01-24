@@ -543,12 +543,13 @@ export async function createPRWithAutoMerge(
     body: string;
   }
 ): Promise<{ success: boolean; prNumber?: number; prUrl?: string; error?: string }> {
-  // Create PR
-  const escapedTitle = options.title.replace(/"/g, '\\"');
-  const escapedBody = options.body.replace(/"/g, '\\"').replace(/\n/g, '\\n');
-
+  // Create PR using heredoc for proper body handling
+  // gh pr create outputs the PR URL on success
   const createResult = await execCommand(
-    `gh pr create --head "${options.head}" --base "${options.base}" --title "${escapedTitle}" --body "${escapedBody}" --json number,url`,
+    `gh pr create --head "${options.head}" --base "${options.base}" --title "${options.title.replace(/"/g, '\\"')}" --body "$(cat <<'PRBODYEOF'
+${options.body}
+PRBODYEOF
+)"`,
     cwd,
     60000
   );
@@ -560,19 +561,19 @@ export async function createPRWithAutoMerge(
     };
   }
 
-  let prNumber: number;
-  let prUrl: string;
+  // Parse PR URL from stdout (gh pr create prints the URL)
+  const prUrl = createResult.stdout.trim();
 
-  try {
-    const prData = JSON.parse(createResult.stdout);
-    prNumber = prData.number;
-    prUrl = prData.url;
-  } catch {
+  // Extract PR number from URL (e.g., https://github.com/owner/repo/pull/123)
+  const prNumberMatch = prUrl.match(/\/pull\/(\d+)$/);
+  if (!prNumberMatch) {
     return {
       success: false,
-      error: 'Failed to parse PR creation response',
+      error: `Failed to parse PR number from URL: ${prUrl}`,
     };
   }
+
+  const prNumber = parseInt(prNumberMatch[1], 10);
 
   // Enable auto-merge
   const mergeResult = await execCommand(
