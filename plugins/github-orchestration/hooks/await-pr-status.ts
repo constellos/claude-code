@@ -30,7 +30,9 @@ import {
   awaitCIWithFailFast,
   getLatestCIRun,
   extractPreviewUrls,
+  extractLinkedIssuesFromPR,
 } from '../shared/hooks/utils/ci-status.js';
+import { addPRToState } from '../shared/hooks/utils/github-state.js';
 
 // Local CI functions removed - using shared utilities from ci-status.ts
 
@@ -103,11 +105,29 @@ async function handler(
     // Wait for CI checks with fail-fast behavior
     const ciResult = await awaitCIWithFailFast({ prNumber }, input.cwd);
 
-    // Get latest CI run details
-    const ciRun = await getLatestCIRun(prNumber, input.cwd);
+    // Get latest CI run details, preview URLs, and linked issues in parallel
+    const [ciRun, previewUrls, linkedIssues] = await Promise.all([
+      getLatestCIRun(prNumber, input.cwd),
+      extractPreviewUrls(prNumber, input.cwd),
+      extractLinkedIssuesFromPR(prNumber, input.cwd),
+    ]);
 
-    // Get Vercel preview URLs
-    const previewUrls = await extractPreviewUrls(prNumber, input.cwd);
+    // Extract PR URL from original command output
+    const prUrlMatch = resultText.match(/https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+/);
+    const prUrl = prUrlMatch ? prUrlMatch[0] : `https://github.com/unknown/unknown/pull/${prNumber}`;
+
+    // Track PR in github.json
+    await addPRToState(
+      input.session_id,
+      {
+        number: prNumber,
+        url: prUrl,
+        title: '', // Title not available from gh pr create output
+        createdAt: new Date().toISOString(),
+        linkedIssues,
+      },
+      input.cwd
+    );
 
     // Save full CI output to log file if there are checks
     let logPath: string | undefined;

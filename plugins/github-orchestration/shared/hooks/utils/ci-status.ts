@@ -133,6 +133,18 @@ export interface PreviewUrls {
 }
 
 /**
+ * Grouped preview URLs by provider
+ */
+export interface GroupedPreviewUrls {
+  /** Vercel preview URLs */
+  vercel: string[];
+  /** Cloudflare Worker/Pages preview URLs */
+  cloudflare: string[];
+  /** Supabase preview branch URLs */
+  supabase: string[];
+}
+
+/**
  * Execute a shell command with timeout
  *
  * @param command - Command to execute
@@ -448,6 +460,204 @@ export async function extractPreviewUrls(
   } catch {
     return { allUrls: [] };
   }
+}
+
+/**
+ * Extract linked issue numbers from PR body
+ *
+ * Parses PR body for GitHub issue-closing keywords like:
+ * - Fixes #123, Closes #456, Resolves #789
+ * - Full URLs: github.com/owner/repo/issues/123
+ *
+ * @param prNumber - PR number
+ * @param cwd - Working directory
+ * @returns Array of linked issue numbers (deduplicated and sorted)
+ *
+ * @example
+ * ```typescript
+ * const linkedIssues = await extractLinkedIssuesFromPR(42, '/path/to/repo');
+ * // Returns: [123, 456] if PR body contains "Fixes #123" and "Closes #456"
+ * ```
+ */
+export async function extractLinkedIssuesFromPR(
+  prNumber: number,
+  cwd: string
+): Promise<number[]> {
+  const result = await execCommand(
+    `gh pr view ${prNumber} --json body --jq '.body'`,
+    cwd
+  );
+
+  if (!result.success || !result.stdout) {
+    return [];
+  }
+
+  const body = result.stdout;
+  const linkedIssues: Set<number> = new Set();
+
+  // Pattern 1: Issue-closing keywords with # reference
+  // Matches: fix, fixes, fixed, close, closes, closed, resolve, resolves, resolved
+  const keywordPattern = /\b(?:fix|fixes|fixed|close|closes|closed|resolve|resolves|resolved)\s+#(\d+)/gi;
+  let match;
+  while ((match = keywordPattern.exec(body)) !== null) {
+    linkedIssues.add(parseInt(match[1], 10));
+  }
+
+  // Pattern 2: Full GitHub issue URLs
+  // Matches: https://github.com/owner/repo/issues/123
+  const urlPattern = /github\.com\/[^/]+\/[^/]+\/issues\/(\d+)/g;
+  while ((match = urlPattern.exec(body)) !== null) {
+    linkedIssues.add(parseInt(match[1], 10));
+  }
+
+  // Return sorted array
+  return Array.from(linkedIssues).sort((a, b) => a - b);
+}
+
+/**
+ * Extract Cloudflare Worker/Pages preview URLs from PR comments
+ *
+ * Searches PR comments for Cloudflare deployment URLs:
+ * - Workers: https://my-worker.workers.dev
+ * - Pages: https://my-project.pages.dev
+ *
+ * @param prNumber - PR number
+ * @param cwd - Working directory
+ * @returns Array of Cloudflare preview URLs
+ *
+ * @example
+ * ```typescript
+ * const urls = await extractCloudflarePreviewUrls(42, '/path/to/repo');
+ * // Returns: ['https://my-api.workers.dev', 'https://my-site.pages.dev']
+ * ```
+ */
+export async function extractCloudflarePreviewUrls(
+  prNumber: number,
+  cwd: string
+): Promise<string[]> {
+  const result = await execCommand(`gh pr view ${prNumber} --json comments`, cwd);
+
+  if (!result.success) {
+    return [];
+  }
+
+  try {
+    const data = JSON.parse(result.stdout);
+    const comments = data.comments || [];
+    const allUrls: string[] = [];
+
+    // Cloudflare Workers pattern: https://something.workers.dev
+    const workersPattern = /https:\/\/[a-z0-9-]+\.workers\.dev/gi;
+    // Cloudflare Pages pattern: https://something.pages.dev
+    const pagesPattern = /https:\/\/[a-z0-9-]+\.pages\.dev/gi;
+
+    for (const comment of comments) {
+      const body = comment.body || '';
+      const workersMatches = body.match(workersPattern) || [];
+      const pagesMatches = body.match(pagesPattern) || [];
+      allUrls.push(...workersMatches, ...pagesMatches);
+    }
+
+    // Deduplicate
+    return [...new Set(allUrls)];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Extract Supabase preview branch URLs from PR comments
+ *
+ * Searches PR comments for Supabase preview URLs:
+ * - API: https://project-ref.supabase.co
+ * - Database: db.project-ref.supabase.co
+ *
+ * @param prNumber - PR number
+ * @param cwd - Working directory
+ * @returns Array of Supabase preview URLs
+ *
+ * @example
+ * ```typescript
+ * const urls = await extractSupabasePreviewBranches(42, '/path/to/repo');
+ * // Returns: ['https://abcxyz-preview.supabase.co']
+ * ```
+ */
+export async function extractSupabasePreviewBranches(
+  prNumber: number,
+  cwd: string
+): Promise<string[]> {
+  const result = await execCommand(`gh pr view ${prNumber} --json comments`, cwd);
+
+  if (!result.success) {
+    return [];
+  }
+
+  try {
+    const data = JSON.parse(result.stdout);
+    const comments = data.comments || [];
+    const allUrls: string[] = [];
+
+    // Supabase API URL pattern: https://something.supabase.co
+    const supabasePattern = /https:\/\/[a-z0-9-]+\.supabase\.co/gi;
+    // Supabase DB URL pattern: db.something.supabase.co (may or may not have https://)
+    const dbPattern = /(?:https?:\/\/)?db\.[a-z0-9-]+\.supabase\.co/gi;
+
+    for (const comment of comments) {
+      const body = comment.body || '';
+      const supabaseMatches = body.match(supabasePattern) || [];
+      const dbMatches = body.match(dbPattern) || [];
+      allUrls.push(...supabaseMatches, ...dbMatches);
+    }
+
+    // Deduplicate and normalize (ensure https://)
+    const uniqueUrls = [...new Set(allUrls)].map((url) => {
+      if (!url.startsWith('http')) {
+        return `https://${url}`;
+      }
+      return url;
+    });
+
+    return uniqueUrls;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Extract all preview URLs grouped by provider
+ *
+ * Consolidates preview URLs from Vercel, Cloudflare, and Supabase.
+ *
+ * @param prNumber - PR number
+ * @param cwd - Working directory
+ * @returns Grouped preview URLs by provider
+ *
+ * @example
+ * ```typescript
+ * const previews = await extractAllPreviews(42, '/path/to/repo');
+ * // Returns: {
+ * //   vercel: ['https://my-app-abc123.vercel.app'],
+ * //   cloudflare: ['https://my-worker.workers.dev'],
+ * //   supabase: ['https://abcxyz.supabase.co']
+ * // }
+ * ```
+ */
+export async function extractAllPreviews(
+  prNumber: number,
+  cwd: string
+): Promise<GroupedPreviewUrls> {
+  // Fetch all previews in parallel
+  const [vercelResult, cloudflareUrls, supabaseUrls] = await Promise.all([
+    extractPreviewUrls(prNumber, cwd),
+    extractCloudflarePreviewUrls(prNumber, cwd),
+    extractSupabasePreviewBranches(prNumber, cwd),
+  ]);
+
+  return {
+    vercel: vercelResult.allUrls,
+    cloudflare: cloudflareUrls,
+    supabase: supabaseUrls,
+  };
 }
 
 /**

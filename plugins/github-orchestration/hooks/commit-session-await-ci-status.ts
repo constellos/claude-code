@@ -52,8 +52,11 @@ import {
 import {
   awaitCIWithFailFast,
   getLatestCIRun as getCIRunDetails,
-  extractPreviewUrls,
+  extractAllPreviews,
+  extractLinkedIssuesFromPR,
+  type GroupedPreviewUrls,
 } from '../shared/hooks/utils/ci-status.js';
+import { addPRToState } from '../shared/hooks/utils/github-state.js';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { existsSync, readFileSync } from 'fs';
@@ -733,9 +736,8 @@ Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>`;
  * @param ciRun.status - CI run status
  * @param ciRun.conclusion - CI run conclusion
  * @param ciRun.name - CI run name
- * @param vercelUrls - Vercel preview URLs
- * @param vercelUrls.webUrl - Web app preview URL
- * @param vercelUrls.marketingUrl - Marketing app preview URL
+ * @param groupedPreviews - Preview URLs grouped by provider
+ * @param linkedIssues - Issue numbers linked from PR body
  * @returns Formatted message
  * @example
  */
@@ -743,7 +745,8 @@ function formatPRStatusWithCommit(
   commitSha: string,
   prCheck: { prNumber: number; prUrl: string },
   ciRun: { url?: string; status?: string; conclusion?: string; name?: string },
-  vercelUrls: { webUrl?: string; marketingUrl?: string }
+  groupedPreviews: GroupedPreviewUrls,
+  linkedIssues: number[]
 ): string {
   const ciPassed = ciRun.conclusion === 'success';
   const ciFailed = ciRun.conclusion === 'failure';
@@ -759,11 +762,36 @@ function formatPRStatusWithCommit(
     message += `🔄 CI: ${ciRun.url} ${statusIcon} ${ciRun.conclusion || ciRun.status || 'pending'}\n`;
   }
 
-  // Preview URLs
-  if (vercelUrls.webUrl || vercelUrls.marketingUrl) {
-    message += '\n🌐 Previews:\n';
-    if (vercelUrls.webUrl) message += `   • ${vercelUrls.webUrl}\n`;
-    if (vercelUrls.marketingUrl) message += `   • ${vercelUrls.marketingUrl}\n`;
+  // Linked issues (if any)
+  if (linkedIssues.length > 0) {
+    message += '\n📌 Linked Issue(s):\n';
+    for (const issueNum of linkedIssues) {
+      message += `   • #${issueNum}\n`;
+    }
+  }
+
+  // Vercel Previews
+  if (groupedPreviews.vercel.length > 0) {
+    message += '\n🔼 Vercel Previews:\n';
+    for (const url of groupedPreviews.vercel) {
+      message += `   • ${url}\n`;
+    }
+  }
+
+  // Cloudflare Previews
+  if (groupedPreviews.cloudflare.length > 0) {
+    message += '\n☁️ Cloudflare Worker Previews:\n';
+    for (const url of groupedPreviews.cloudflare) {
+      message += `   • ${url}\n`;
+    }
+  }
+
+  // Supabase Previews
+  if (groupedPreviews.supabase.length > 0) {
+    message += '\n⚡ Supabase Preview Branches:\n';
+    for (const url of groupedPreviews.supabase) {
+      message += `   • ${url}\n`;
+    }
   }
 
   message += '\nPress enter to continue.';
@@ -780,16 +808,16 @@ function formatPRStatusWithCommit(
  * @param ciRun.status - CI run status
  * @param ciRun.conclusion - CI run conclusion
  * @param ciRun.name - CI run name
- * @param vercelUrls - Vercel preview URLs
- * @param vercelUrls.webUrl - Web app preview URL
- * @param vercelUrls.marketingUrl - Marketing app preview URL
+ * @param groupedPreviews - Preview URLs grouped by provider
+ * @param linkedIssues - Issue numbers linked from PR body
  * @returns Formatted message
  * @example
  */
 function formatPRStatusInfo(
   prCheck: { prNumber: number; prUrl: string },
   ciRun: { url?: string; status?: string; conclusion?: string; name?: string },
-  vercelUrls: { webUrl?: string; marketingUrl?: string }
+  groupedPreviews: GroupedPreviewUrls,
+  linkedIssues: number[]
 ): string {
   // Header (simplified - this function only called when CI passed or pending)
   let message = '✅ PR Ready for Review\n\n';
@@ -802,11 +830,36 @@ function formatPRStatusInfo(
     message += `🔄 [View CI Run](${ciRun.url}) ✅ success\n`;
   }
 
-  // Preview URLs
-  if (vercelUrls.webUrl || vercelUrls.marketingUrl) {
-    message += '\n🌐 Previews:\n';
-    if (vercelUrls.webUrl) message += `   • ${vercelUrls.webUrl}\n`;
-    if (vercelUrls.marketingUrl) message += `   • ${vercelUrls.marketingUrl}\n`;
+  // Linked issues (if any)
+  if (linkedIssues.length > 0) {
+    message += '\n📌 Linked Issue(s):\n';
+    for (const issueNum of linkedIssues) {
+      message += `   • #${issueNum}\n`;
+    }
+  }
+
+  // Vercel Previews
+  if (groupedPreviews.vercel.length > 0) {
+    message += '\n🔼 Vercel Previews:\n';
+    for (const url of groupedPreviews.vercel) {
+      message += `   • ${url}\n`;
+    }
+  }
+
+  // Cloudflare Previews
+  if (groupedPreviews.cloudflare.length > 0) {
+    message += '\n☁️ Cloudflare Worker Previews:\n';
+    for (const url of groupedPreviews.cloudflare) {
+      message += `   • ${url}\n`;
+    }
+  }
+
+  // Supabase Previews
+  if (groupedPreviews.supabase.length > 0) {
+    message += '\n⚡ Supabase Preview Branches:\n';
+    for (const url of groupedPreviews.supabase) {
+      message += `   • ${url}\n`;
+    }
   }
 
   message += '\nPress enter to continue.';
@@ -1162,9 +1215,25 @@ ${checksTable}
         checks: ciResult.checks
       });
 
-      // Fetch PR details
-      const ciRun = await getCIRunDetails(prCheck.prNumber, repoRoot) ?? {};
-      const vercelUrls = await extractPreviewUrls(prCheck.prNumber, repoRoot);
+      // Fetch PR details, previews, and linked issues in parallel
+      const [ciRun, groupedPreviews, linkedIssues] = await Promise.all([
+        getCIRunDetails(prCheck.prNumber, repoRoot).then(r => r ?? {}),
+        extractAllPreviews(prCheck.prNumber, repoRoot),
+        extractLinkedIssuesFromPR(prCheck.prNumber, repoRoot),
+      ]);
+
+      // Track PR in github.json
+      await addPRToState(
+        input.session_id,
+        {
+          number: prCheck.prNumber,
+          url: prCheck.prUrl,
+          title: '', // We don't have title here, could fetch if needed
+          createdAt: new Date().toISOString(),
+          linkedIssues,
+        },
+        repoRoot
+      );
 
       // If CI run shows failure, block Claude (don't show to user)
       if (ciRun.conclusion === 'failure' || ciRun.conclusion === 'cancelled') {
@@ -1183,19 +1252,19 @@ ${checksTable}
         // Show PR status after commit (non-blocking)
         return {
           decision: 'approve',
-          systemMessage: formatPRStatusWithCommit(commitSha, { prNumber: prCheck.prNumber, prUrl: prCheck.prUrl }, ciRun, vercelUrls),
+          systemMessage: formatPRStatusWithCommit(commitSha, { prNumber: prCheck.prNumber, prUrl: prCheck.prUrl }, ciRun, groupedPreviews, linkedIssues),
         };
       } else if (commitsAheadOfMain > 0) {
         // Show PR status to user (non-blocking)
         return {
           decision: 'approve',
-          systemMessage: formatPRStatusInfo({ prNumber: prCheck.prNumber, prUrl: prCheck.prUrl }, ciRun, vercelUrls),
+          systemMessage: formatPRStatusInfo({ prNumber: prCheck.prNumber, prUrl: prCheck.prUrl }, ciRun, groupedPreviews, linkedIssues),
         };
       } else {
         // Always show PR status when PR exists, even if no new commits this session (non-blocking)
         return {
           decision: 'approve',
-          systemMessage: formatPRStatusInfo({ prNumber: prCheck.prNumber, prUrl: prCheck.prUrl }, ciRun, vercelUrls),
+          systemMessage: formatPRStatusInfo({ prNumber: prCheck.prNumber, prUrl: prCheck.prUrl }, ciRun, groupedPreviews, linkedIssues),
         };
       }
     }

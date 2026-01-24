@@ -20,6 +20,7 @@ import type { PostToolUseInput, PostToolUseHookOutput } from '../shared/types/ty
 import { createDebugLogger } from '../shared/hooks/utils/debug.js';
 import { runHook } from '../shared/hooks/utils/io.js';
 import { addIssueToSession } from '../shared/hooks/utils/session-issues.js';
+import { addIssueToState } from '../shared/hooks/utils/github-state.js';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
@@ -195,7 +196,9 @@ async function handler(input: PostToolUseInput): Promise<PostToolUseHookOutput> 
 
     const branch = branchResult.stdout;
 
-    // Add issue to session tracking
+    const createdAt = new Date().toISOString();
+
+    // Add issue to session tracking (session-issues.json)
     await addIssueToSession(
       input.session_id,
       {
@@ -203,10 +206,22 @@ async function handler(input: PostToolUseInput): Promise<PostToolUseHookOutput> 
         number: issueNumber,
         title: issueDetails.title,
         url: issueUrl,
-        createdAt: new Date().toISOString(),
+        createdAt,
       },
       branch,
       repo,
+      input.cwd
+    );
+
+    // Also add issue to unified github.json state
+    await addIssueToState(
+      input.session_id,
+      {
+        number: issueNumber,
+        url: issueUrl,
+        title: issueDetails.title,
+        createdAt,
+      },
       input.cwd
     );
 
