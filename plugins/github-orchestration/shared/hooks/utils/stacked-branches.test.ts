@@ -11,7 +11,6 @@ import { tmpdir } from 'os';
 import {
   generateSubagentBranchName,
   loadStackedBranchesState,
-  saveStackedBranchesState,
   createStackedBranchEntry,
   getStackedBranchEntry,
   updateStackedBranchEntry,
