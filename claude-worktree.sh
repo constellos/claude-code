@@ -766,9 +766,8 @@ _cw_main() {
         # Get worktree-specific cache directory (per-worktree isolation)
         local wt_cache_dir=$(_cw_get_worktree_cache_dir "$worktree_dir")
 
-        # Update symlink to point to this worktree's cache
-        # This ensures each worktree has isolated cache without breaking others
-        _cw_update_cache_symlink "$wt_cache_dir"
+        # NOTE: Symlink update is deferred until AFTER plugins are installed
+        # This prevents race condition where hooks execute from empty cache
 
         local current_path=$(claude plugin marketplace list 2>/dev/null | grep -A1 "constellos-local" | grep "Directory" | sed 's/.*(\(.*\))/\1/')
 
@@ -875,6 +874,12 @@ _cw_main() {
           _cw_item "✘" "${plugin}"
         fi
       done <<< "$plugins"
+    fi
+
+    # Update symlink AFTER plugins are installed to prevent race condition
+    # where SessionStart hooks execute from empty cache directory
+    if [[ -n "$wt_cache_dir" ]]; then
+      _cw_update_cache_symlink "$wt_cache_dir"
     fi
   fi
   set -e

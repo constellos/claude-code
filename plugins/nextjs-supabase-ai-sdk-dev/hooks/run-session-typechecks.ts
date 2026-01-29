@@ -10,6 +10,7 @@
 import type { StopInput, StopHookOutput } from '../shared/types/types.js';
 import { runHook } from '../shared/hooks/utils/io.js';
 import { findConfigFile } from '../shared/hooks/utils/config-resolver.js';
+import { detectWorktree } from '../shared/hooks/utils/worktree.js';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
@@ -49,12 +50,22 @@ async function handler(input: StopInput): Promise<StopHookOutput> {
     console.log('[run-session-typechecks] Session ID:', input.session_id);
   }
 
-  // Find tsconfig.json
-  const tsconfigDir = await findConfigFile(input.cwd, 'tsconfig.json');
+  // Normalize cwd to worktree/repo root for consistent config resolution
+  // This fixes false positives in monorepos where input.cwd might be a subdirectory
+  const worktreeInfo = detectWorktree(input.cwd);
+  const searchRoot = worktreeInfo.worktreePath;
+
+  if (DEBUG) {
+    console.log('[run-session-typechecks] Search root:', searchRoot);
+    console.log('[run-session-typechecks] Is worktree:', worktreeInfo.isWorktree);
+  }
+
+  // Find tsconfig.json starting from repo/worktree root
+  const tsconfigDir = await findConfigFile(searchRoot, 'tsconfig.json');
 
   if (!tsconfigDir) {
     // No tsconfig.json found - skip with warning visible in systemMessage
-    const warning = `⚠️ TypeScript check skipped: tsconfig.json not found (searched from ${input.cwd})`;
+    const warning = `⚠️ TypeScript check skipped: tsconfig.json not found (searched from ${searchRoot})`;
     if (DEBUG) {
       console.warn(`[run-session-typechecks] ${warning}`);
     }
