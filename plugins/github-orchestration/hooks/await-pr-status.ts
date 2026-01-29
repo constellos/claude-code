@@ -29,8 +29,9 @@ import {
 import {
   awaitCIWithFailFast,
   getLatestCIRun,
-  extractPreviewUrls,
+  extractAllPreviews,
   extractLinkedIssuesFromPR,
+  formatGroupedPreviews,
 } from '../shared/hooks/utils/ci-status.js';
 import { addPRToState } from '../shared/hooks/utils/github-state.js';
 
@@ -106,9 +107,9 @@ async function handler(
     const ciResult = await awaitCIWithFailFast({ prNumber }, input.cwd);
 
     // Get latest CI run details, preview URLs, and linked issues in parallel
-    const [ciRun, previewUrls, linkedIssues] = await Promise.all([
+    const [ciRun, groupedPreviews, linkedIssues] = await Promise.all([
       getLatestCIRun(prNumber, input.cwd),
-      extractPreviewUrls(prNumber, input.cwd),
+      extractAllPreviews(prNumber, input.cwd),
       extractLinkedIssuesFromPR(prNumber, input.cwd),
     ]);
 
@@ -169,18 +170,18 @@ async function handler(
       statusMessage += `\n🔗 [CI Run](${ciRun.url})`;
     }
 
-    // Add Vercel preview URLs (concise)
-    if (previewUrls.allUrls.length > 0) {
-      statusMessage += `\n🔗 Preview: ${previewUrls.allUrls[0]}`;
-      if (previewUrls.allUrls.length > 1) {
-        statusMessage += ` (+${previewUrls.allUrls.length - 1} more)`;
-      }
+    // Add all preview URLs grouped by provider
+    const previewSection = formatGroupedPreviews(groupedPreviews);
+    if (previewSection) {
+      statusMessage += previewSection;
     }
 
     await logger.logOutput({
       success: ciResult.success,
       ci_status: ciRun?.status,
-      vercel_urls: previewUrls.allUrls,
+      vercel_urls: groupedPreviews.vercel,
+      cloudflare_urls: groupedPreviews.cloudflare,
+      supabase_urls: groupedPreviews.supabase,
     });
 
     return {

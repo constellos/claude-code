@@ -91,8 +91,8 @@
   "enabledPlugins": {
     "plugin-dev@claude-code-plugins": true,
     "feature-dev@claude-code-plugins": true,
-    "nextjs-supabase-ai-sdk-dev@constellos": true,
-    "github-orchestration@constellos": true
+    "github-orchestration@constellos": true,
+    "nextjs-supabase-ai-sdk-dev@constellos": true
   },
   "extraKnownMarketplaces": {
     "claude-code-plugins": {

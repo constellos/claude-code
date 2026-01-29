@@ -739,6 +739,56 @@ export async function extractAllPreviews(
 }
 
 /**
+ * Format grouped preview URLs for display
+ *
+ * Formats preview URLs from all providers (Vercel, Cloudflare, Supabase)
+ * into a markdown-formatted string with provider sections.
+ *
+ * @param previews - Grouped preview URLs by provider
+ * @returns Formatted markdown string, empty if no previews
+ *
+ * @example
+ * ```typescript
+ * const previews = await extractAllPreviews(42, '/path/to/repo');
+ * const formatted = formatGroupedPreviews(previews);
+ * // Returns:
+ * // "
+ * // **Vercel Previews:**
+ * //    - https://my-app-abc123.vercel.app
+ * //
+ * // **Cloudflare Previews:**
+ * //    - https://my-worker.workers.dev
+ * // "
+ * ```
+ */
+export function formatGroupedPreviews(previews: GroupedPreviewUrls): string {
+  let message = '';
+
+  if (previews.vercel.length > 0) {
+    message += '\n\n**Vercel Previews:**';
+    for (const url of previews.vercel) {
+      message += `\n   - ${url}`;
+    }
+  }
+
+  if (previews.cloudflare.length > 0) {
+    message += '\n\n**Cloudflare Previews:**';
+    for (const url of previews.cloudflare) {
+      message += `\n   - ${url}`;
+    }
+  }
+
+  if (previews.supabase.length > 0) {
+    message += '\n\n**Supabase Previews:**';
+    for (const url of previews.supabase) {
+      message += `\n   - ${url}`;
+    }
+  }
+
+  return message;
+}
+
+/**
  * Parse CI checks output into structured format
  *
  * @param output - Raw output from `gh pr checks`

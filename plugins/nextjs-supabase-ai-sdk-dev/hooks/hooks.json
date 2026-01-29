@@ -6,6 +6,25 @@
     "Tracks task/agent calls for context",
     "Check hooks moved to rule-based system in project-context plugin"
   ],
+  "_disabled_hooks": {
+    "_note": "Disabled hooks preserved for future re-enabling",
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "npx tsx ${CLAUDE_PLUGIN_ROOT}/hooks/install-start-supabase-next.ts",
+        "description": "Sets up Supabase local dev: installs CLI, starts Docker, starts Supabase, exports env vars, starts dev server",
+        "timeout": 600
+      }
+    ],
+    "SessionEnd": [
+      {
+        "type": "command",
+        "command": "npx tsx ${CLAUDE_PLUGIN_ROOT}/hooks/cleanup-supabase-session.ts",
+        "description": "Stops Supabase containers and marks session as stopped when session ends",
+        "timeout": 60
+      }
+    ]
+  },
   "description": "Local development environment setup for Next.js, Supabase, and AI SDK projects",
   "hooks": {
     "SessionStart": [
@@ -26,12 +45,6 @@
             "type": "command",
             "command": "npx tsx ${CLAUDE_PLUGIN_ROOT}/hooks/link-vercel-apps.ts",
             "description": "Auto-links monorepo apps to Vercel projects and pulls env vars"
-          },
-          {
-            "type": "command",
-            "command": "npx tsx ${CLAUDE_PLUGIN_ROOT}/hooks/install-start-supabase-next.ts",
-            "description": "Sets up Supabase local dev: installs CLI, starts Docker, starts Supabase, exports env vars, starts dev server",
-            "timeout": 600
           },
           {
             "type": "command",
@@ -108,18 +121,6 @@
             "type": "command",
             "command": "npx tsx ${CLAUDE_PLUGIN_ROOT}/hooks/run-session-typechecks.ts",
             "description": "Runs tsc --noEmit before session stops. Blocking on type errors."
-          }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "npx tsx ${CLAUDE_PLUGIN_ROOT}/hooks/cleanup-supabase-session.ts",
-            "description": "Stops Supabase containers and marks session as stopped when session ends",
-            "timeout": 60
           }
         ]
       }
