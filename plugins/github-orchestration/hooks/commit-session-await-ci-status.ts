@@ -53,9 +53,11 @@ import {
   awaitCIWithFailFast,
   getLatestCIRun as getCIRunDetails,
   extractAllPreviews,
-  extractLinkedIssuesFromPR,
+  extractLinkedIssuesWithInfo,
   type GroupedPreviewUrls,
+  type LinkedIssueInfo,
 } from '../shared/hooks/utils/ci-status.js';
+import { getSessionIssues, type IssueReference } from '../shared/hooks/utils/session-issues.js';
 import { addPRToState } from '../shared/hooks/utils/github-state.js';
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -726,6 +728,33 @@ Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>`;
 }
 
 /**
+ * Format a linked issue for display
+ * @param issue - Issue info with number, url, and repo
+ * @param prRepo - PR's repository for comparison
+ * @returns Formatted issue string
+ */
+function formatLinkedIssue(issue: LinkedIssueInfo, prRepo: string): string {
+  // If same repo as PR, show just #number
+  // If different repo, show owner/repo#number
+  const prefix = issue.repo === prRepo ? `#${issue.number}` : `${issue.repo}#${issue.number}`;
+  const titlePart = issue.title ? ` - ${issue.title}` : '';
+  return `${prefix}${titlePart} → ${issue.url}`;
+}
+
+/**
+ * Format a session issue for display (other issues section)
+ * @param issue - Issue reference from session tracking
+ * @param currentRepo - Current repository for comparison
+ * @returns Formatted issue string
+ */
+function formatSessionIssue(issue: IssueReference, currentRepo: string): string {
+  // If same repo, show just #number; if different, show owner/repo#number
+  const prefix = issue.repo === currentRepo ? `#${issue.number}` : `${issue.repo}#${issue.number}`;
+  const titlePart = issue.title ? ` - ${issue.title}` : '';
+  return `${prefix}${titlePart} → ${issue.url}`;
+}
+
+/**
  * Format PR status message when commit was made and PR exists
  * @param commitSha - Commit SHA
  * @param prCheck - PR details
@@ -737,7 +766,9 @@ Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>`;
  * @param ciRun.conclusion - CI run conclusion
  * @param ciRun.name - CI run name
  * @param groupedPreviews - Preview URLs grouped by provider
- * @param linkedIssues - Issue numbers linked from PR body
+ * @param linkedIssues - Issues linked from PR body (closes when merged)
+ * @param otherIssues - Other issues created during session but not linked to PR
+ * @param prRepo - PR's repository name (owner/repo)
  * @returns Formatted message
  * @example
  */
@@ -746,7 +777,9 @@ function formatPRStatusWithCommit(
   prCheck: { prNumber: number; prUrl: string },
   ciRun: { url?: string; status?: string; conclusion?: string; name?: string },
   groupedPreviews: GroupedPreviewUrls,
-  linkedIssues: number[]
+  linkedIssues: LinkedIssueInfo[],
+  otherIssues: IssueReference[],
+  prRepo: string
 ): string {
   const ciPassed = ciRun.conclusion === 'success';
   const ciFailed = ciRun.conclusion === 'failure';
@@ -762,11 +795,19 @@ function formatPRStatusWithCommit(
     message += `🔄 CI: ${ciRun.url} ${statusIcon} ${ciRun.conclusion || ciRun.status || 'pending'}\n`;
   }
 
-  // Linked issues (if any)
+  // Linked issues (closes when merged) - nested under PR
   if (linkedIssues.length > 0) {
-    message += '\n📌 Linked Issue(s):\n';
-    for (const issueNum of linkedIssues) {
-      message += `   • #${issueNum}\n`;
+    message += '\n   📌 Linked Issues (closes when merged):\n';
+    for (const issue of linkedIssues) {
+      message += `      • ${formatLinkedIssue(issue, prRepo)}\n`;
+    }
+  }
+
+  // Other issues created during session (not linked to PR)
+  if (otherIssues.length > 0) {
+    message += '\n📝 Other Issues Created:\n';
+    for (const issue of otherIssues) {
+      message += `   • ${formatSessionIssue(issue, prRepo)}\n`;
     }
   }
 
@@ -809,7 +850,9 @@ function formatPRStatusWithCommit(
  * @param ciRun.conclusion - CI run conclusion
  * @param ciRun.name - CI run name
  * @param groupedPreviews - Preview URLs grouped by provider
- * @param linkedIssues - Issue numbers linked from PR body
+ * @param linkedIssues - Issues linked from PR body (closes when merged)
+ * @param otherIssues - Other issues created during session but not linked to PR
+ * @param prRepo - PR's repository name (owner/repo)
  * @returns Formatted message
  * @example
  */
@@ -817,7 +860,9 @@ function formatPRStatusInfo(
   prCheck: { prNumber: number; prUrl: string },
   ciRun: { url?: string; status?: string; conclusion?: string; name?: string },
   groupedPreviews: GroupedPreviewUrls,
-  linkedIssues: number[]
+  linkedIssues: LinkedIssueInfo[],
+  otherIssues: IssueReference[],
+  prRepo: string
 ): string {
   // Header (simplified - this function only called when CI passed or pending)
   let message = '✅ PR Ready for Review\n\n';
@@ -830,11 +875,19 @@ function formatPRStatusInfo(
     message += `🔄 [View CI Run](${ciRun.url}) ✅ success\n`;
   }
 
-  // Linked issues (if any)
+  // Linked issues (closes when merged) - nested under PR
   if (linkedIssues.length > 0) {
-    message += '\n📌 Linked Issue(s):\n';
-    for (const issueNum of linkedIssues) {
-      message += `   • #${issueNum}\n`;
+    message += '\n   📌 Linked Issues (closes when merged):\n';
+    for (const issue of linkedIssues) {
+      message += `      • ${formatLinkedIssue(issue, prRepo)}\n`;
+    }
+  }
+
+  // Other issues created during session (not linked to PR)
+  if (otherIssues.length > 0) {
+    message += '\n📝 Other Issues Created:\n';
+    for (const issue of otherIssues) {
+      message += `   • ${formatSessionIssue(issue, prRepo)}\n`;
     }
   }
 
@@ -1215,14 +1268,25 @@ ${checksTable}
         checks: ciResult.checks
       });
 
-      // Fetch PR details, previews, and linked issues in parallel
-      const [ciRun, groupedPreviews, linkedIssues] = await Promise.all([
+      // Fetch PR details, previews, linked issues, and session issues in parallel
+      const [ciRun, groupedPreviews, linkedIssues, sessionIssues] = await Promise.all([
         getCIRunDetails(prCheck.prNumber, repoRoot).then(r => r ?? {}),
         extractAllPreviews(prCheck.prNumber, repoRoot),
-        extractLinkedIssuesFromPR(prCheck.prNumber, repoRoot),
+        extractLinkedIssuesWithInfo(prCheck.prNumber, repoRoot),
+        getSessionIssues(input.session_id, repoRoot),
       ]);
 
-      // Track PR in github.json
+      // Extract PR repo from URL for display formatting
+      const prRepoMatch = prCheck.prUrl.match(/github\.com\/([^/]+\/[^/]+)\/pull/);
+      const prRepo = prRepoMatch ? prRepoMatch[1] : '';
+
+      // Filter session issues to find "other issues" not linked to the PR
+      const linkedIssueKeys = new Set(linkedIssues.map(i => `${i.repo}#${i.number}`));
+      const otherIssues = sessionIssues.filter(
+        issue => !linkedIssueKeys.has(`${issue.repo}#${issue.number}`)
+      );
+
+      // Track PR in github.json (store just issue numbers for backwards compatibility)
       await addPRToState(
         input.session_id,
         {
@@ -1230,7 +1294,7 @@ ${checksTable}
           url: prCheck.prUrl,
           title: '', // We don't have title here, could fetch if needed
           createdAt: new Date().toISOString(),
-          linkedIssues,
+          linkedIssues: linkedIssues.map(i => i.number),
         },
         repoRoot
       );
@@ -1252,19 +1316,19 @@ ${checksTable}
         // Show PR status after commit (non-blocking)
         return {
           decision: 'approve',
-          systemMessage: formatPRStatusWithCommit(commitSha, { prNumber: prCheck.prNumber, prUrl: prCheck.prUrl }, ciRun, groupedPreviews, linkedIssues),
+          systemMessage: formatPRStatusWithCommit(commitSha, { prNumber: prCheck.prNumber, prUrl: prCheck.prUrl }, ciRun, groupedPreviews, linkedIssues, otherIssues, prRepo),
         };
       } else if (commitsAheadOfMain > 0) {
         // Show PR status to user (non-blocking)
         return {
           decision: 'approve',
-          systemMessage: formatPRStatusInfo({ prNumber: prCheck.prNumber, prUrl: prCheck.prUrl }, ciRun, groupedPreviews, linkedIssues),
+          systemMessage: formatPRStatusInfo({ prNumber: prCheck.prNumber, prUrl: prCheck.prUrl }, ciRun, groupedPreviews, linkedIssues, otherIssues, prRepo),
         };
       } else {
         // Always show PR status when PR exists, even if no new commits this session (non-blocking)
         return {
           decision: 'approve',
-          systemMessage: formatPRStatusInfo({ prNumber: prCheck.prNumber, prUrl: prCheck.prUrl }, ciRun, groupedPreviews, linkedIssues),
+          systemMessage: formatPRStatusInfo({ prNumber: prCheck.prNumber, prUrl: prCheck.prUrl }, ciRun, groupedPreviews, linkedIssues, otherIssues, prRepo),
         };
       }
     }

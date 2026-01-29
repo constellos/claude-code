@@ -133,6 +133,20 @@ export interface PreviewUrls {
 }
 
 /**
+ * Information about an issue linked to a PR
+ */
+export interface LinkedIssueInfo {
+  /** Issue number */
+  number: number;
+  /** Issue title (if fetched) */
+  title?: string;
+  /** Full issue URL */
+  url: string;
+  /** Repository owner/name (extracted from URL) */
+  repo: string;
+}
+
+/**
  * Grouped preview URLs by provider
  */
 export interface GroupedPreviewUrls {
@@ -463,7 +477,7 @@ export async function extractPreviewUrls(
 }
 
 /**
- * Extract linked issue numbers from PR body
+ * Extract linked issue numbers from PR body (simple version)
  *
  * Parses PR body for GitHub issue-closing keywords like:
  * - Fixes #123, Closes #456, Resolves #789
@@ -483,8 +497,37 @@ export async function extractLinkedIssuesFromPR(
   prNumber: number,
   cwd: string
 ): Promise<number[]> {
+  const linkedIssues = await extractLinkedIssuesWithInfo(prNumber, cwd);
+  return linkedIssues.map((issue) => issue.number).sort((a, b) => a - b);
+}
+
+/**
+ * Extract linked issues with full info from PR body
+ *
+ * Parses PR body for GitHub issue-closing keywords and returns rich info:
+ * - Fixes #123, Closes #456, Resolves #789
+ * - Full URLs: github.com/owner/repo/issues/123
+ *
+ * For #123 references, constructs URL using the PR's repository.
+ * For full URLs, extracts the repo from the URL (supports cross-repo links).
+ *
+ * @param prNumber - PR number
+ * @param cwd - Working directory
+ * @returns Array of LinkedIssueInfo with number, url, and repo
+ *
+ * @example
+ * ```typescript
+ * const linkedIssues = await extractLinkedIssuesWithInfo(42, '/path/to/repo');
+ * // Returns: [{ number: 123, url: 'https://github.com/owner/repo/issues/123', repo: 'owner/repo' }]
+ * ```
+ */
+export async function extractLinkedIssuesWithInfo(
+  prNumber: number,
+  cwd: string
+): Promise<LinkedIssueInfo[]> {
+  // Get PR body and URL to extract repo info
   const result = await execCommand(
-    `gh pr view ${prNumber} --json body --jq '.body'`,
+    `gh pr view ${prNumber} --json body,url`,
     cwd
   );
 
@@ -492,26 +535,61 @@ export async function extractLinkedIssuesFromPR(
     return [];
   }
 
-  const body = result.stdout;
-  const linkedIssues: Set<number> = new Set();
+  let body: string;
+  let prUrl: string;
+  try {
+    const data = JSON.parse(result.stdout);
+    body = data.body || '';
+    prUrl = data.url || '';
+  } catch {
+    return [];
+  }
 
-  // Pattern 1: Issue-closing keywords with # reference
+  // Extract repo from PR URL: https://github.com/owner/repo/pull/123
+  const prRepoMatch = prUrl.match(/github\.com\/([^/]+\/[^/]+)\/pull/);
+  const prRepo = prRepoMatch ? prRepoMatch[1] : '';
+
+  const linkedIssues: Map<string, LinkedIssueInfo> = new Map();
+
+  // Pattern 1: Issue-closing keywords with # reference (same repo)
   // Matches: fix, fixes, fixed, close, closes, closed, resolve, resolves, resolved
   const keywordPattern = /\b(?:fix|fixes|fixed|close|closes|closed|resolve|resolves|resolved)\s+#(\d+)/gi;
   let match;
   while ((match = keywordPattern.exec(body)) !== null) {
-    linkedIssues.add(parseInt(match[1], 10));
+    const num = parseInt(match[1], 10);
+    const url = prRepo ? `https://github.com/${prRepo}/issues/${num}` : '';
+    const key = `${prRepo}#${num}`;
+    if (!linkedIssues.has(key)) {
+      linkedIssues.set(key, {
+        number: num,
+        url,
+        repo: prRepo,
+      });
+    }
   }
 
-  // Pattern 2: Full GitHub issue URLs
+  // Pattern 2: Full GitHub issue URLs (may be cross-repo)
   // Matches: https://github.com/owner/repo/issues/123
-  const urlPattern = /github\.com\/[^/]+\/[^/]+\/issues\/(\d+)/g;
+  const urlPattern = /https:\/\/github\.com\/([^/]+\/[^/]+)\/issues\/(\d+)/g;
   while ((match = urlPattern.exec(body)) !== null) {
-    linkedIssues.add(parseInt(match[1], 10));
+    const repo = match[1];
+    const num = parseInt(match[2], 10);
+    const url = `https://github.com/${repo}/issues/${num}`;
+    const key = `${repo}#${num}`;
+    if (!linkedIssues.has(key)) {
+      linkedIssues.set(key, {
+        number: num,
+        url,
+        repo,
+      });
+    }
   }
 
-  // Return sorted array
-  return Array.from(linkedIssues).sort((a, b) => a - b);
+  // Return sorted by repo then number
+  return Array.from(linkedIssues.values()).sort((a, b) => {
+    if (a.repo !== b.repo) return a.repo.localeCompare(b.repo);
+    return a.number - b.number;
+  });
 }
 
 /**
