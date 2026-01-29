@@ -91,18 +91,10 @@
   "enabledPlugins": {
     "plugin-dev@claude-code-plugins": true,
     "feature-dev@claude-code-plugins": true,
-    "github-orchestration@constellos-local": true,
     "nextjs-supabase-ai-sdk-dev@constellos": true,
-    "nextjs-supabase-ai-sdk-dev@constellos-local": true,
-    "project-context@constellos-local": true
+    "github-orchestration@constellos": true
   },
   "extraKnownMarketplaces": {
-    "constellos-local": {
-      "source": {
-        "source": "directory",
-        "path": "${CLAUDE_PROJECT_DIR}/.claude-plugin"
-      }
-    },
     "claude-code-plugins": {
       "source": {
         "source": "github",
