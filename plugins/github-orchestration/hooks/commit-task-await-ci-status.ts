@@ -121,6 +121,18 @@ async function handler(
       return {};
     }
 
+    // Refuse to auto-commit on protected branches
+    const branchResult = await execCommand('git rev-parse --abbrev-ref HEAD', input.cwd);
+    const currentBranch = branchResult.success ? branchResult.stdout : null;
+    const protectedBranches = ['main', 'master', 'develop'];
+    if (currentBranch && protectedBranches.includes(currentBranch)) {
+      await logger.logOutput({
+        skipped: true,
+        reason: `Refusing to auto-commit on protected branch: ${currentBranch}`,
+      });
+      return {};
+    }
+
     // Get task edits (file operations and prompt)
     let taskEdits;
     try {

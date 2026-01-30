@@ -609,6 +609,14 @@ _cw_main() {
   local suffix=$(LC_ALL=C tr -dc 'a-z0-9' </dev/urandom | head -c 8)
   local branch_name="claude-${adj}-${name}-${suffix}"
 
+  # Defense-in-depth: reject if generated name matches a protected branch
+  case "$branch_name" in
+    main|master|develop)
+      echo "Error: Generated branch name '$branch_name' matches a protected branch."
+      return 1
+      ;;
+  esac
+
   # Check if we're in a git repository
   if ! git rev-parse --is-inside-work-tree &>/dev/null; then
     echo "Not in a git repo, launching claude normally..."
