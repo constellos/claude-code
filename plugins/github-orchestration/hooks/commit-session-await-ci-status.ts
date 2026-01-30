@@ -1148,46 +1148,57 @@ async function handler(input: StopInput): Promise<StopHookOutput> {
 
     if (hasChanges) {
       const branch = await getCurrentBranch(repoRoot);
+      const protectedBranches = ['main', 'master', 'develop'];
+      const isProtectedBranch = branch !== null && protectedBranches.includes(branch);
 
-      // Only stage non-gitignored files
-      const filesToStage = await getNonIgnoredChanges(repoRoot);
-      if (filesToStage.length === 0) {
-        // All changes are gitignored - skip commit
-        await logger.logOutput({ skipped: true, reason: 'All changes are gitignored' });
-      } else {
-        // Stage only non-ignored files
-        for (const file of filesToStage) {
-          await execCommand(`git add "${file}"`, repoRoot);
-        }
+      if (isProtectedBranch) {
+        await logger.logOutput({
+          skipped: true,
+          reason: `Refusing to auto-commit on protected branch: ${branch}`,
+        });
+      }
 
-        const commitMessage = formatCommitMessage(input.session_id, branch);
-        const commitResult = await execCommand(
-          `git commit -m ${JSON.stringify(commitMessage)}`,
-          repoRoot
-        );
-
-        if (commitResult.success) {
-          const shaResult = await execCommand('git rev-parse HEAD', repoRoot);
-          const fullSha = shaResult.success ? shaResult.stdout : null;
-          commitSha = fullSha ? fullSha.substring(0, 7) : 'unknown';
-          commitMade = true;
-
-          await logger.logOutput({ commit_made: true, commit_sha: commitSha });
-
-          // Update state with new commit SHA for tracking
-          await updateSessionStopState(input.session_id, {
-            blockCount: sessionState.blockCount + 1,
-            lastBlockTimestamp: new Date().toISOString(),
-            lastSeenCommitSha: fullSha || undefined,
-          }, repoRoot);
-
-          // Re-check branch sync after commit
-          const postCommitSync = await checkBranchSync(repoRoot);
-          syncCheck.aheadBy = postCommitSync.aheadBy;
-          // Also update commits ahead of main
-          commitsAheadOfMain = await getCommitsAheadOfMain(repoRoot);
+      if (!isProtectedBranch) {
+        // Only stage non-gitignored files
+        const filesToStage = await getNonIgnoredChanges(repoRoot);
+        if (filesToStage.length === 0) {
+          // All changes are gitignored - skip commit
+          await logger.logOutput({ skipped: true, reason: 'All changes are gitignored' });
         } else {
-          await logger.logOutput({ commit_failed: true, error: commitResult.stderr });
+          // Stage only non-ignored files
+          for (const file of filesToStage) {
+            await execCommand(`git add "${file}"`, repoRoot);
+          }
+
+          const commitMessage = formatCommitMessage(input.session_id, branch);
+          const commitResult = await execCommand(
+            `git commit -m ${JSON.stringify(commitMessage)}`,
+            repoRoot
+          );
+
+          if (commitResult.success) {
+            const shaResult = await execCommand('git rev-parse HEAD', repoRoot);
+            const fullSha = shaResult.success ? shaResult.stdout : null;
+            commitSha = fullSha ? fullSha.substring(0, 7) : 'unknown';
+            commitMade = true;
+
+            await logger.logOutput({ commit_made: true, commit_sha: commitSha });
+
+            // Update state with new commit SHA for tracking
+            await updateSessionStopState(input.session_id, {
+              blockCount: sessionState.blockCount + 1,
+              lastBlockTimestamp: new Date().toISOString(),
+              lastSeenCommitSha: fullSha || undefined,
+            }, repoRoot);
+
+            // Re-check branch sync after commit
+            const postCommitSync = await checkBranchSync(repoRoot);
+            syncCheck.aheadBy = postCommitSync.aheadBy;
+            // Also update commits ahead of main
+            commitsAheadOfMain = await getCommitsAheadOfMain(repoRoot);
+          } else {
+            await logger.logOutput({ commit_failed: true, error: commitResult.stderr });
+          }
         }
       }
     }
