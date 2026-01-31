@@ -819,19 +819,19 @@ function formatPRStatusWithCommit(
     }
   }
 
-  // Cloudflare Previews
+  // Cloudflare Deployments
   if (groupedPreviews.cloudflare.length > 0) {
-    message += '\n☁️ Cloudflare Worker Previews:\n';
+    message += '\n☁️ Cloudflare Deployments:\n';
     for (const url of groupedPreviews.cloudflare) {
       message += `   • ${url}\n`;
     }
   }
 
-  // Supabase Previews
+  // Supabase Previews (dashboard links)
   if (groupedPreviews.supabase.length > 0) {
     message += '\n⚡ Supabase Preview Branches:\n';
-    for (const url of groupedPreviews.supabase) {
-      message += `   • ${url}\n`;
+    for (const preview of groupedPreviews.supabase) {
+      message += `   • ${preview.dashboardUrl}\n`;
     }
   }
 
@@ -899,19 +899,19 @@ function formatPRStatusInfo(
     }
   }
 
-  // Cloudflare Previews
+  // Cloudflare Deployments
   if (groupedPreviews.cloudflare.length > 0) {
-    message += '\n☁️ Cloudflare Worker Previews:\n';
+    message += '\n☁️ Cloudflare Deployments:\n';
     for (const url of groupedPreviews.cloudflare) {
       message += `   • ${url}\n`;
     }
   }
 
-  // Supabase Previews
+  // Supabase Previews (dashboard links)
   if (groupedPreviews.supabase.length > 0) {
     message += '\n⚡ Supabase Preview Branches:\n';
-    for (const url of groupedPreviews.supabase) {
-      message += `   • ${url}\n`;
+    for (const preview of groupedPreviews.supabase) {
+      message += `   • ${preview.dashboardUrl}\n`;
     }
   }
 

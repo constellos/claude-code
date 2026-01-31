@@ -147,15 +147,29 @@ export interface LinkedIssueInfo {
 }
 
 /**
+ * Supabase preview branch info with dashboard link
+ */
+export interface SupabasePreview {
+  /** Supabase project reference ID */
+  ref: string;
+  /** API URL: https://{ref}.supabase.co */
+  apiUrl: string;
+  /** Dashboard URL: https://supabase.com/dashboard/project/{ref} */
+  dashboardUrl: string;
+  /** Database URL: db.{ref}.supabase.co (if found) */
+  dbUrl?: string;
+}
+
+/**
  * Grouped preview URLs by provider
  */
 export interface GroupedPreviewUrls {
   /** Vercel preview URLs */
   vercel: string[];
-  /** Cloudflare Worker/Pages preview URLs */
+  /** Cloudflare Worker/Pages deployment URLs */
   cloudflare: string[];
-  /** Supabase preview branch URLs */
-  supabase: string[];
+  /** Supabase preview branches with dashboard links */
+  supabase: SupabasePreview[];
 }
 
 /**
@@ -412,6 +426,35 @@ export async function getLatestCIRun(
 }
 
 /**
+ * Fetch PR comment bodies as an array of strings
+ *
+ * Consolidates the `gh pr view --json comments` call so multiple
+ * extractors can share the same data without redundant API calls.
+ *
+ * @param prNumber - PR number
+ * @param cwd - Working directory
+ * @returns Array of comment body strings
+ */
+export async function fetchPRCommentBodies(
+  prNumber: number,
+  cwd: string
+): Promise<string[]> {
+  const result = await execCommand(`gh pr view ${prNumber} --json comments`, cwd);
+
+  if (!result.success) {
+    return [];
+  }
+
+  try {
+    const data = JSON.parse(result.stdout);
+    const comments = data.comments || [];
+    return comments.map((c: { body?: string }) => c.body || '');
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Extract Vercel preview URLs from PR comments
  *
  * Searches PR comments for Vercel bot URLs and categorizes them
@@ -419,6 +462,7 @@ export async function getLatestCIRun(
  *
  * @param prNumber - PR number
  * @param cwd - Working directory
+ * @param commentBodies - Pre-fetched comment bodies (optional, fetches if not provided)
  * @returns Preview URLs object with categorized URLs
  *
  * @example
@@ -431,49 +475,39 @@ export async function getLatestCIRun(
  */
 export async function extractPreviewUrls(
   prNumber: number,
-  cwd: string
+  cwd: string,
+  commentBodies?: string[]
 ): Promise<PreviewUrls> {
-  const result = await execCommand(`gh pr view ${prNumber} --json comments`, cwd);
+  const bodies = commentBodies ?? await fetchPRCommentBodies(prNumber, cwd);
 
-  if (!result.success) {
-    return { allUrls: [] };
+  const vercelUrlPattern = /https:\/\/[a-z0-9-]+\.vercel\.app/g;
+  const allUrls: string[] = [];
+
+  for (const body of bodies) {
+    const matches = body.match(vercelUrlPattern) || [];
+    allUrls.push(...matches);
   }
 
-  try {
-    const data = JSON.parse(result.stdout);
-    const comments = data.comments || [];
+  // Deduplicate URLs
+  const uniqueUrls = [...new Set(allUrls)];
 
-    const vercelUrlPattern = /https:\/\/[a-z0-9-]+\.vercel\.app/g;
-    const allUrls: string[] = [];
+  // Identify web and marketing apps by URL pattern
+  const webUrl = uniqueUrls.find(
+    (url) =>
+      url.includes('-web-') || url.includes('web-') || url.match(/web\.vercel\.app/)
+  );
+  const marketingUrl = uniqueUrls.find(
+    (url) =>
+      url.includes('-marketing-') ||
+      url.includes('marketing-') ||
+      url.match(/marketing\.vercel\.app/)
+  );
 
-    for (const comment of comments) {
-      const matches = comment.body?.match(vercelUrlPattern) || [];
-      allUrls.push(...matches);
-    }
-
-    // Deduplicate URLs
-    const uniqueUrls = [...new Set(allUrls)];
-
-    // Identify web and marketing apps by URL pattern
-    const webUrl = uniqueUrls.find(
-      (url) =>
-        url.includes('-web-') || url.includes('web-') || url.match(/web\.vercel\.app/)
-    );
-    const marketingUrl = uniqueUrls.find(
-      (url) =>
-        url.includes('-marketing-') ||
-        url.includes('marketing-') ||
-        url.match(/marketing\.vercel\.app/)
-    );
-
-    return {
-      webUrl,
-      marketingUrl,
-      allUrls: uniqueUrls,
-    };
-  } catch {
-    return { allUrls: [] };
-  }
+  return {
+    webUrl,
+    marketingUrl,
+    allUrls: uniqueUrls,
+  };
 }
 
 /**
@@ -593,7 +627,7 @@ export async function extractLinkedIssuesWithInfo(
 }
 
 /**
- * Extract Cloudflare Worker/Pages preview URLs from PR comments
+ * Extract Cloudflare Worker/Pages deployment URLs from PR comments
  *
  * Searches PR comments for Cloudflare deployment URLs:
  * - Workers: https://my-worker.workers.dev
@@ -601,7 +635,8 @@ export async function extractLinkedIssuesWithInfo(
  *
  * @param prNumber - PR number
  * @param cwd - Working directory
- * @returns Array of Cloudflare preview URLs
+ * @param commentBodies - Pre-fetched comment bodies (optional, fetches if not provided)
+ * @returns Array of Cloudflare deployment URLs
  *
  * @example
  * ```typescript
@@ -611,91 +646,165 @@ export async function extractLinkedIssuesWithInfo(
  */
 export async function extractCloudflarePreviewUrls(
   prNumber: number,
-  cwd: string
+  cwd: string,
+  commentBodies?: string[]
 ): Promise<string[]> {
-  const result = await execCommand(`gh pr view ${prNumber} --json comments`, cwd);
+  const bodies = commentBodies ?? await fetchPRCommentBodies(prNumber, cwd);
 
-  if (!result.success) {
-    return [];
+  const allUrls: string[] = [];
+
+  // Cloudflare Workers pattern: https://something.workers.dev
+  const workersPattern = /https:\/\/[a-z0-9-]+\.workers\.dev/gi;
+  // Cloudflare Pages pattern: https://something.pages.dev
+  const pagesPattern = /https:\/\/[a-z0-9-]+\.pages\.dev/gi;
+
+  for (const body of bodies) {
+    const workersMatches = body.match(workersPattern) || [];
+    const pagesMatches = body.match(pagesPattern) || [];
+    allUrls.push(...workersMatches, ...pagesMatches);
   }
 
-  try {
-    const data = JSON.parse(result.stdout);
-    const comments = data.comments || [];
-    const allUrls: string[] = [];
-
-    // Cloudflare Workers pattern: https://something.workers.dev
-    const workersPattern = /https:\/\/[a-z0-9-]+\.workers\.dev/gi;
-    // Cloudflare Pages pattern: https://something.pages.dev
-    const pagesPattern = /https:\/\/[a-z0-9-]+\.pages\.dev/gi;
-
-    for (const comment of comments) {
-      const body = comment.body || '';
-      const workersMatches = body.match(workersPattern) || [];
-      const pagesMatches = body.match(pagesPattern) || [];
-      allUrls.push(...workersMatches, ...pagesMatches);
-    }
-
-    // Deduplicate
-    return [...new Set(allUrls)];
-  } catch {
-    return [];
-  }
+  // Deduplicate
+  return [...new Set(allUrls)];
 }
 
 /**
- * Extract Supabase preview branch URLs from PR comments
+ * Extract Supabase preview branches from PR comments
  *
- * Searches PR comments for Supabase preview URLs:
- * - API: https://project-ref.supabase.co
- * - Database: db.project-ref.supabase.co
+ * Searches PR comments for Supabase URLs and extracts project refs to
+ * construct dashboard links:
+ * - API URLs: https://{ref}.supabase.co
+ * - DB URLs: db.{ref}.supabase.co
+ * - Dashboard URLs: supabase.com/dashboard/project/{ref}
  *
  * @param prNumber - PR number
  * @param cwd - Working directory
- * @returns Array of Supabase preview URLs
+ * @param commentBodies - Pre-fetched comment bodies (optional, fetches if not provided)
+ * @returns Array of SupabasePreview objects with dashboard links
  *
  * @example
  * ```typescript
- * const urls = await extractSupabasePreviewBranches(42, '/path/to/repo');
- * // Returns: ['https://abcxyz-preview.supabase.co']
+ * const previews = await extractSupabasePreviewBranches(42, '/path/to/repo');
+ * // Returns: [{ ref: 'abcxyz', apiUrl: 'https://abcxyz.supabase.co',
+ * //            dashboardUrl: 'https://supabase.com/dashboard/project/abcxyz' }]
  * ```
  */
 export async function extractSupabasePreviewBranches(
   prNumber: number,
-  cwd: string
-): Promise<string[]> {
-  const result = await execCommand(`gh pr view ${prNumber} --json comments`, cwd);
+  cwd: string,
+  commentBodies?: string[]
+): Promise<SupabasePreview[]> {
+  const bodies = commentBodies ?? await fetchPRCommentBodies(prNumber, cwd);
 
-  if (!result.success) {
-    return [];
-  }
+  // Map of ref -> { apiUrl, dbUrl } for deduplication
+  const refMap = new Map<string, { apiUrl: string; dbUrl?: string }>();
 
-  try {
-    const data = JSON.parse(result.stdout);
-    const comments = data.comments || [];
-    const allUrls: string[] = [];
+  // Supabase API URL pattern: https://{ref}.supabase.co
+  const apiPattern = /https:\/\/([a-z0-9-]+)\.supabase\.co/gi;
+  // Supabase DB URL pattern: db.{ref}.supabase.co
+  const dbPattern = /(?:https?:\/\/)?db\.([a-z0-9-]+)\.supabase\.co/gi;
+  // Dashboard URL pattern: supabase.com/dashboard/project/{ref}
+  const dashboardPattern = /supabase\.com\/dashboard\/project\/([a-z0-9-]+)/gi;
 
-    // Supabase API URL pattern: https://something.supabase.co
-    const supabasePattern = /https:\/\/[a-z0-9-]+\.supabase\.co/gi;
-    // Supabase DB URL pattern: db.something.supabase.co (may or may not have https://)
-    const dbPattern = /(?:https?:\/\/)?db\.[a-z0-9-]+\.supabase\.co/gi;
-
-    for (const comment of comments) {
-      const body = comment.body || '';
-      const supabaseMatches = body.match(supabasePattern) || [];
-      const dbMatches = body.match(dbPattern) || [];
-      allUrls.push(...supabaseMatches, ...dbMatches);
+  for (const body of bodies) {
+    // Extract refs from API URLs
+    let match;
+    while ((match = apiPattern.exec(body)) !== null) {
+      const ref = match[1];
+      if (!refMap.has(ref)) {
+        refMap.set(ref, { apiUrl: `https://${ref}.supabase.co` });
+      }
     }
 
-    // Deduplicate and normalize (ensure https://)
-    const uniqueUrls = [...new Set(allUrls)].map((url) => {
-      if (!url.startsWith('http')) {
-        return `https://${url}`;
+    // Extract refs from DB URLs
+    while ((match = dbPattern.exec(body)) !== null) {
+      const ref = match[1];
+      const existing = refMap.get(ref);
+      if (existing) {
+        existing.dbUrl = `https://db.${ref}.supabase.co`;
+      } else {
+        refMap.set(ref, { apiUrl: `https://${ref}.supabase.co`, dbUrl: `https://db.${ref}.supabase.co` });
       }
-      return url;
-    });
+    }
 
-    return uniqueUrls;
+    // Extract refs from dashboard URLs
+    while ((match = dashboardPattern.exec(body)) !== null) {
+      const ref = match[1];
+      if (!refMap.has(ref)) {
+        refMap.set(ref, { apiUrl: `https://${ref}.supabase.co` });
+      }
+    }
+  }
+
+  // Convert to SupabasePreview array
+  return Array.from(refMap.entries()).map(([ref, info]) => ({
+    ref,
+    apiUrl: info.apiUrl,
+    dashboardUrl: `https://supabase.com/dashboard/project/${ref}`,
+    dbUrl: info.dbUrl,
+  }));
+}
+
+/**
+ * Extract Cloudflare deployment URLs from GitHub Deployments API
+ *
+ * Queries the GitHub Deployments API for the PR's head commit to find
+ * Cloudflare deployment URLs (both Workers and Pages). This supplements
+ * comment-based extraction for repos that use GitHub Deployments.
+ *
+ * @param prNumber - PR number
+ * @param cwd - Working directory
+ * @returns Array of Cloudflare deployment URLs (empty on error)
+ */
+export async function extractDeploymentUrls(
+  prNumber: number,
+  cwd: string
+): Promise<string[]> {
+  try {
+    // Get PR head SHA and repo info
+    const prResult = await execCommand(
+      `gh pr view ${prNumber} --json headRefOid,url`,
+      cwd
+    );
+    if (!prResult.success) return [];
+
+    const prData = JSON.parse(prResult.stdout);
+    const headSha = prData.headRefOid;
+    const repoMatch = (prData.url as string).match(/github\.com\/([^/]+\/[^/]+)\/pull/);
+    if (!headSha || !repoMatch) return [];
+
+    const repo = repoMatch[1];
+
+    // Query GitHub Deployments API for this commit
+    const deploymentsResult = await execCommand(
+      `gh api repos/${repo}/deployments?sha=${headSha}&per_page=10`,
+      cwd
+    );
+    if (!deploymentsResult.success) return [];
+
+    const deployments = JSON.parse(deploymentsResult.stdout);
+    if (!Array.isArray(deployments) || deployments.length === 0) return [];
+
+    const urls: string[] = [];
+
+    // For each deployment, get the latest status to find environment_url
+    for (const deployment of deployments) {
+      const statusResult = await execCommand(
+        `gh api repos/${repo}/deployments/${deployment.id}/statuses?per_page=1`,
+        cwd
+      );
+      if (!statusResult.success) continue;
+
+      const statuses = JSON.parse(statusResult.stdout);
+      if (!Array.isArray(statuses) || statuses.length === 0) continue;
+
+      const envUrl = statuses[0].environment_url;
+      if (envUrl && (envUrl.includes('.pages.dev') || envUrl.includes('.workers.dev'))) {
+        urls.push(envUrl);
+      }
+    }
+
+    return [...new Set(urls)];
   } catch {
     return [];
   }
@@ -705,6 +814,8 @@ export async function extractSupabasePreviewBranches(
  * Extract all preview URLs grouped by provider
  *
  * Consolidates preview URLs from Vercel, Cloudflare, and Supabase.
+ * Fetches PR comments once and shares across all comment-based extractors.
+ * Also queries GitHub Deployments API for additional Cloudflare URLs.
  *
  * @param prNumber - PR number
  * @param cwd - Working directory
@@ -716,7 +827,7 @@ export async function extractSupabasePreviewBranches(
  * // Returns: {
  * //   vercel: ['https://my-app-abc123.vercel.app'],
  * //   cloudflare: ['https://my-worker.workers.dev'],
- * //   supabase: ['https://abcxyz.supabase.co']
+ * //   supabase: [{ ref: 'abc', apiUrl: '...', dashboardUrl: '...' }]
  * // }
  * ```
  */
@@ -724,17 +835,24 @@ export async function extractAllPreviews(
   prNumber: number,
   cwd: string
 ): Promise<GroupedPreviewUrls> {
+  // Fetch comments once, share across all comment-based extractors
+  const commentBodies = await fetchPRCommentBodies(prNumber, cwd);
+
   // Fetch all previews in parallel
-  const [vercelResult, cloudflareUrls, supabaseUrls] = await Promise.all([
-    extractPreviewUrls(prNumber, cwd),
-    extractCloudflarePreviewUrls(prNumber, cwd),
-    extractSupabasePreviewBranches(prNumber, cwd),
+  const [vercelResult, commentCloudflareUrls, deploymentCloudflareUrls, supabasePreviews] = await Promise.all([
+    extractPreviewUrls(prNumber, cwd, commentBodies),
+    extractCloudflarePreviewUrls(prNumber, cwd, commentBodies),
+    extractDeploymentUrls(prNumber, cwd),
+    extractSupabasePreviewBranches(prNumber, cwd, commentBodies),
   ]);
+
+  // Merge and deduplicate Cloudflare URLs from comments + deployments API
+  const allCloudflareUrls = [...new Set([...commentCloudflareUrls, ...deploymentCloudflareUrls])];
 
   return {
     vercel: vercelResult.allUrls,
-    cloudflare: cloudflareUrls,
-    supabase: supabaseUrls,
+    cloudflare: allCloudflareUrls,
+    supabase: supabasePreviews,
   };
 }
 
@@ -772,7 +890,7 @@ export function formatGroupedPreviews(previews: GroupedPreviewUrls): string {
   }
 
   if (previews.cloudflare.length > 0) {
-    message += '\n\n**Cloudflare Previews:**';
+    message += '\n\n**Cloudflare Deployments:**';
     for (const url of previews.cloudflare) {
       message += `\n   - ${url}`;
     }
@@ -780,8 +898,8 @@ export function formatGroupedPreviews(previews: GroupedPreviewUrls): string {
 
   if (previews.supabase.length > 0) {
     message += '\n\n**Supabase Previews:**';
-    for (const url of previews.supabase) {
-      message += `\n   - ${url}`;
+    for (const preview of previews.supabase) {
+      message += `\n   - ${preview.dashboardUrl}`;
     }
   }
 
