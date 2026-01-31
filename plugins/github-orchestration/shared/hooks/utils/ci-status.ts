@@ -653,15 +653,18 @@ export async function extractCloudflarePreviewUrls(
 
   const allUrls: string[] = [];
 
-  // Cloudflare Workers pattern: https://something.workers.dev
-  const workersPattern = /https:\/\/[a-z0-9-]+\.workers\.dev/gi;
-  // Cloudflare Pages pattern: https://something.pages.dev
-  const pagesPattern = /https:\/\/[a-z0-9-]+\.pages\.dev/gi;
+  // Cloudflare Workers pattern: https://something.workers.dev (supports subdomains like abc123.my-project.workers.dev)
+  const workersPattern = /https:\/\/[a-z0-9.-]+\.workers\.dev/gi;
+  // Cloudflare Pages pattern: https://something.pages.dev (supports subdomains like abc123.my-project.pages.dev)
+  const pagesPattern = /https:\/\/[a-z0-9.-]+\.pages\.dev/gi;
+  // Cloudflare dashboard URL pattern: https://dash.cloudflare.com/...
+  const dashPattern = /https:\/\/dash\.cloudflare\.com\/[^\s)]+/gi;
 
   for (const body of bodies) {
     const workersMatches = body.match(workersPattern) || [];
     const pagesMatches = body.match(pagesPattern) || [];
-    allUrls.push(...workersMatches, ...pagesMatches);
+    const dashMatches = body.match(dashPattern) || [];
+    allUrls.push(...workersMatches, ...pagesMatches, ...dashMatches);
   }
 
   // Deduplicate
@@ -707,6 +710,12 @@ export async function extractSupabasePreviewBranches(
   const dashboardPattern = /supabase\.com\/dashboard\/project\/([a-z0-9-]+)/gi;
 
   for (const body of bodies) {
+    // Skip comments where the Supabase bot indicates the PR was ignored
+    // (no supabase changes detected, so no preview branch was created)
+    if (body.includes('has been ignored')) {
+      continue;
+    }
+
     // Extract refs from API URLs
     let match;
     while ((match = apiPattern.exec(body)) !== null) {
