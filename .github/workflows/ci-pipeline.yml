@@ -6,70 +6,14 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
-  issues: read
-  checks: write
 
 concurrency:
   group: ci-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
-  lint:
-    name: "Lint"
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install --frozen-lockfile
-      - run: bun run lint
-
-  typecheck:
-    name: "Typecheck"
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install --frozen-lockfile
-      - run: bun run typecheck
-
-  test:
-    name: "Test"
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install --frozen-lockfile
-      - run: bun run test -- --passWithNoTests || echo "No tests"
-
-  review:
-    name: "AI Review"
-    needs: [lint, typecheck]
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Code Quality Review
-        id: review
-        uses: constellos/claude-code-actions/.github/actions/code-quality-reviewer@main
-        with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          pr_number: ${{ github.event.pull_request.number }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Post review comment
-        if: always()
-        uses: constellos/claude-code-actions/.github/actions/review-comment@main
-        with:
-          review_name: 'Code Quality'
-          passed: ${{ steps.review.outputs.passed }}
-          result_json: ${{ steps.review.outputs.result }}
-          checks_passed: ${{ steps.review.outputs.checks_passed }}
-          checks_failed: ${{ steps.review.outputs.checks_failed }}
-          checks_skipped: ${{ steps.review.outputs.checks_skipped }}
-          pr_number: ${{ github.event.pull_request.number }}
-          sha: ${{ github.sha }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+  CI:
+    uses: constellos/.github/.github/workflows/ci-pipeline-reusable.yml@main
+    with:
+      node_version: '22'
+    secrets: inherit
