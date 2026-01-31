@@ -4,13 +4,6 @@ on:
   pull_request:
     branches: ['**']
 
-permissions:
-  contents: read
-
-concurrency:
-  group: ci-${{ github.head_ref || github.ref_name }}
-  cancel-in-progress: true
-
 jobs:
   CI:
     uses: constellos/.github/.github/workflows/ci-pipeline-reusable.yml@main
