@@ -181,7 +181,7 @@ async function handler(
       ci_status: ciRun?.status,
       vercel_urls: groupedPreviews.vercel,
       cloudflare_urls: groupedPreviews.cloudflare,
-      supabase_urls: groupedPreviews.supabase,
+      supabase_urls: groupedPreviews.supabase.map(s => s.dashboardUrl),
     });
 
     return {
