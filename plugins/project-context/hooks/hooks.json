@@ -119,17 +119,6 @@
         }
       ]
     }
-  ],
-  "Stop": [
-    {
-      "hooks": [
-        {
-          "type": "prompt",
-          "prompt": "Review if this Claude Code session should stop. Evaluate:\n\n1. Was the user's original request addressed?\n2. Were all requested tasks completed?\n3. Are there unfinished items or errors needing attention?\n\nFor exploration/review requests: can complete without code changes.\nFor implementation requests: verify code was written and tested.\n\nReturn {\"ok\": true} to allow stopping, or {\"ok\": false, \"reason\": \"what remains\"} to continue.",
-          "timeout": 60
-        }
-      ]
-    }
   ]
   },
   "_planned_features": [
