@@ -1,0 +1,10 @@
+{
+  "agents": {
+    "requirements": {
+      "enabled": false
+    },
+    "code-quality": {
+      "enabled": false
+    }
+  }
+}
