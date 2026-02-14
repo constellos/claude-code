@@ -1,5 +1,5 @@
 {
-  "name": "claude-code-plugins",
+  "name": "claude-code",
   "version": "1.0.0",
   "description": "Claude Code plugin collection - hook utilities and development tools",
   "type": "module",
@@ -24,7 +24,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/constellos/claude-code-plugins.git"
+    "url": "git+https://github.com/constellos/claude-code.git"
   },
   "author": "constellos",
   "license": "MIT",

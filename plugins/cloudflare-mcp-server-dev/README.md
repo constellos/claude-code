@@ -21,7 +21,7 @@ This plugin provides access to Cloudflare's managed MCP servers for developing a
 
 ```bash
 # Add the constellos marketplace
-claude plugin marketplace add https://github.com/constellos/claude-code-plugins
+claude plugin marketplace add https://github.com/constellos/claude-code
 
 # Install this plugin
 claude plugin install cloudflare-workers-mcp-dev@constellos

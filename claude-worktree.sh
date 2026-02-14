@@ -16,7 +16,7 @@
 #   cw --verbose                # Current dir with claude flags
 #
 # Setup (add to ~/.bashrc or ~/.zshrc):
-#   source ~/constellos/claude-code-plugins/claude-worktree.sh
+#   source ~/constellos/claude-code/claude-worktree.sh
 #
 # Self-Update:
 #   The script auto-updates from origin/main when sourced or called.
