@@ -1,6 +1,6 @@
 ---
 title: GitHub Orchestration Plugin
-description: Comprehensive GitHub workflow orchestration with skills for issues, branches, PRs, subissues, stacked PRs, and CI management
+description: Comprehensive GitHub workflow orchestration with skills for issues, branches, PRs, and CI management
 version: 0.2.0
 folder:
   subfolders:
@@ -13,7 +13,7 @@ folder:
 
 # GitHub Orchestration Plugin
 
-Comprehensive GitHub workflow orchestration with skills for issues, branches, PRs, subissues, stacked PRs, and CI management.
+Comprehensive GitHub workflow orchestration with skills for issues, branches, PRs, and CI management.
 
 ## Hook Summary
 
@@ -24,12 +24,9 @@ Comprehensive GitHub workflow orchestration with skills for issues, branches, PR
 | create-issue-on-prompt | UserPromptSubmit | No | Creates issue on first prompt |
 | sync-plan-to-issue | PostToolUse[Write\|Edit] | No | Syncs plans to issues with version comments |
 | sync-issue-to-plan | PostToolUse[Bash] | No | Syncs gh issue edit back to plan file |
-| sync-task-to-subissue | PostToolUse[Task] | No | Creates subissues from Task prompts |
 | enhance-commit-context | PostToolUse[Bash] | No | Enriches commits with context |
 | await-pr-status | PostToolUse[Bash] | No | Waits for CI after PR create |
-| create-subagent-branch | SubagentStart | No | Creates isolated branch for stacked PR workflow |
 | post-explore-findings | SubagentStop | No | Posts Explore agent findings as comments |
-| stacked-pr-subagent-stop | SubagentStop | No | Handles stacked PR: push, create PR, auto-merge |
 | commit-task-await-ci-status | SubagentStop | No | Auto-commits agent work |
 | commit-session-await-ci-status | Stop | Yes | Auto-commits, waits for CI |
 | close-issue-on-session-end | SessionEnd | No | Closes issue if session ends without PR |
@@ -40,8 +37,6 @@ Comprehensive GitHub workflow orchestration with skills for issues, branches, PR
 |-------|---------|
 | issue-management | Create, update, label, and link issues with templates |
 | branch-orchestration | Smart branch naming, lifecycle management |
-| subissue-orchestration | Hierarchical issues with auto-updated checklists |
-| stacked-pr-management | Dependent PR chains for large features |
 | ci-orchestration | CI/CD monitoring with fail-fast patterns |
 | pr-workflow | PR lifecycle with auto-generated descriptions |
 
