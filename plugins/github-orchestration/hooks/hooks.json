@@ -8,10 +8,8 @@
     "Surfaces related issues from previous sessions based on branch family",
     "Commit enhancement with issue context",
     "Auto-commit for subagent work",
-    "Stacked PR workflow: subagents work on isolated branches with auto-PR",
     "Plan-to-issue synchronization with versioned update comments",
     "Issue-to-plan synchronization (gh issue edit detection)",
-    "Task-to-subissue synchronization (excludes Plan/Explore)",
     "Explore agent findings posted as issue comments",
     "Auto-waits for CI checks after PR creation (gh pr create)",
     "Auto-commit and PR status check on session end"
@@ -80,27 +78,6 @@
             "description": "Syncs gh issue edit body changes back to local plan file"
           }
         ]
-      },
-      {
-        "matcher": "Task",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "npx tsx ${CLAUDE_PLUGIN_ROOT}/hooks/sync-task-to-subissue.ts",
-            "description": "Creates GitHub subissues from Task tool prompts (excludes Plan/Explore agents)"
-          }
-        ]
-      }
-    ],
-    "SubagentStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "npx tsx ${CLAUDE_PLUGIN_ROOT}/hooks/create-subagent-branch.ts",
-            "description": "Creates isolated branch for stacked PR workflow (when enabled)"
-          }
-        ]
       }
     ],
     "SubagentStop": [
@@ -110,12 +87,6 @@
             "type": "command",
             "command": "npx tsx ${CLAUDE_PLUGIN_ROOT}/hooks/post-explore-findings.ts",
             "description": "Posts Explore agent findings as comments on linked GitHub issue"
-          },
-          {
-            "type": "command",
-            "command": "npx tsx ${CLAUDE_PLUGIN_ROOT}/hooks/stacked-pr-subagent-stop.ts",
-            "timeout": 900,
-            "description": "Handles stacked PR workflow: push, create PR, auto-merge (when enabled)"
           },
           {
             "type": "command",

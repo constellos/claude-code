@@ -176,19 +176,6 @@ export function getMinimalIssueBody(description: string, context?: string): stri
 }
 
 /**
- * Create issue body with parent issue reference
- *
- * @param parentIssueNumber - The parent issue number
- * @param description - Issue description
- * @returns Issue body with parent reference
- */
-export function createSubissueBody(parentIssueNumber: number, description: string): string {
-  return `**Parent Issue:** #${parentIssueNumber}
-
-${description}`;
-}
-
-/**
  * Add branch reference to issue body
  *
  * @param issueBody - Existing issue body

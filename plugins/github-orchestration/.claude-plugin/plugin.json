@@ -1,7 +1,7 @@
 {
   "name": "github-orchestration",
   "version": "0.2.0",
-  "description": "Comprehensive GitHub workflow orchestration with skills for issues, branches, PRs, subissues, stacked PRs, and CI management",
+  "description": "Comprehensive GitHub workflow orchestration with skills for issues, branches, PRs, and CI management",
   "author": {
     "name": "constellos"
   },

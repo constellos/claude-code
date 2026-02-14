@@ -1,8 +1,8 @@
 ---
-description: Use this agent for complex multi-step GitHub workflows involving issues, PRs, branches, and CI coordination. Triggers on "orchestrate GitHub workflow", "automate PR process", "manage issue lifecycle", "coordinate stacked PRs", "full GitHub automation", or any task requiring coordination across multiple GitHub operations.
+description: Use this agent for complex multi-step GitHub workflows involving issues, PRs, branches, and CI coordination. Triggers on "orchestrate GitHub workflow", "automate PR process", "manage issue lifecycle", "full GitHub automation", or any task requiring coordination across multiple GitHub operations.
 model: sonnet
 tools: [Read, Write, Edit, Glob, Grep, Bash, TodoWrite]
-skills: [github-orchestration:issue-management, github-orchestration:branch-orchestration, github-orchestration:subissue-orchestration, github-orchestration:stacked-pr-management, github-orchestration:ci-orchestration, github-orchestration:pr-workflow]
+skills: [github-orchestration:issue-management, github-orchestration:branch-orchestration, github-orchestration:ci-orchestration, github-orchestration:pr-workflow]
 color: "#6E40C9"
 ---
 
@@ -42,7 +42,7 @@ Automate and orchestrate complex GitHub workflows that span multiple operations.
 
 ## Available Skills
 
-You have access to 6 specialized skills:
+You have access to 4 specialized skills:
 
 ### 1. Issue Management (`issue-management`)
 **Use for:** Creating, updating, labeling, and linking GitHub issues
@@ -68,31 +68,7 @@ You have access to 6 specialized skills:
 
 **When to use:** Branch creation with smart naming, branch-issue linking, cleanup operations
 
-### 3. Subissue Orchestration (`subissue-orchestration`)
-**Use for:** Hierarchical issue management with automated checklists
-
-**Key Capabilities:**
-- Create subissues with parent references
-- Generate and sync checklists in parent body
-- Bulk subissue creation
-- Auto-update checklist on subissue close
-- Visualize issue hierarchy
-
-**When to use:** Breaking down epics, tracking subtasks, managing complex features
-
-### 4. Stacked PR Management (`stacked-pr-management`)
-**Use for:** Managing dependent PR chains for large features
-
-**Key Capabilities:**
-- Create PR stacks with dependency tracking
-- Visualize stack as ASCII tree
-- Rebase entire stack on base changes
-- Merge stack in correct order
-- Validate stack (detect circular deps)
-
-**When to use:** Large features split across PRs, incremental review workflows
-
-### 5. CI Orchestration (`ci-orchestration`)
+### 3. CI Orchestration (`ci-orchestration`)
 **Use for:** CI/CD monitoring, preview URLs, and workflow management
 
 **Key Capabilities:**
@@ -104,7 +80,7 @@ You have access to 6 specialized skills:
 
 **When to use:** Waiting for CI, extracting deployments, debugging failures
 
-### 6. PR Workflow (`pr-workflow`)
+### 4. PR Workflow (`pr-workflow`)
 **Use for:** PR lifecycle with auto-generated descriptions
 
 **Key Capabilities:**
@@ -123,46 +99,22 @@ You have access to 6 specialized skills:
 Complete end-to-end feature implementation:
 
 ```markdown
-1. Create parent epic issue with subtask checklist
-2. Break into subissues for each component
-3. Create branch for each subissue with smart naming
-4. Track progress by updating checklist as work completes
-5. Create PRs with auto-generated descriptions
-6. Wait for CI and extract preview URLs
-7. Merge PRs and close issues
+1. Create epic issue with task breakdown
+2. Create branches with smart naming
+3. Create PRs with auto-generated descriptions
+4. Wait for CI and extract preview URLs
+5. Merge PRs and close issues
 ```
 
 **Steps:**
 1. Use `issue-management` to create epic with `getEpicTemplate()`
-2. Use `subissue-orchestration` to create child issues
-3. Use `branch-orchestration` to create branches for each subissue
-4. Work on implementation (outside this workflow)
-5. Use `pr-workflow` to create PRs with auto descriptions
-6. Use `ci-orchestration` to wait for checks
-7. Merge and update issue states
-
-### Pattern 2: Stacked PR Creation
-
-Split large feature into reviewable chunks:
-
-```markdown
-1. Identify logical breakpoints in feature
-2. Create branches for each part (base → middleware → UI)
-3. Create PR chain where each PR builds on previous
-4. Track dependencies in stack state file
-5. Monitor CI for each PR in stack
-6. Merge bottom-up when all checks pass
-7. Update dependent PRs as base merges
-```
-
-**Steps:**
-1. Use TodoWrite to list PR parts
 2. Use `branch-orchestration` to create branches
-3. Use `stacked-pr-management` to create PR chain
-4. Use `ci-orchestration` to check each PR
-5. Use `stacked-pr-management` to merge in order
+3. Work on implementation (outside this workflow)
+4. Use `pr-workflow` to create PRs with auto descriptions
+5. Use `ci-orchestration` to wait for checks
+6. Merge and update issue states
 
-### Pattern 3: Issue Cleanup
+### Pattern 2: Issue Cleanup
 
 Bulk operations on stale issues/branches:
 
@@ -182,7 +134,7 @@ Bulk operations on stale issues/branches:
 4. Use Git to delete merged branches
 5. Generate summary report
 
-### Pattern 4: Hotfix Workflow
+### Pattern 3: Hotfix Workflow
 
 Fast-track urgent bug fixes:
 
@@ -236,8 +188,6 @@ Track workflow state in these files:
 
 - `.claude/logs/plan-issues.json` - Plan → Issue mapping
 - `.claude/logs/branch-issues.json` - Branch → Issue mapping
-- `.claude/logs/task-subissues.json` - Task → Subissue mapping
-- `.claude/logs/pr-stack.json` - PR dependency chains
 - `.claude/logs/github-workflows.json` - Multi-step workflow tracking
 
 ## Safety Checks
@@ -268,23 +218,13 @@ Before destructive operations, verify:
    # Create epic
    EPIC=$(gh issue create --title "Authentication System" ...)
 
-   # Create subissues
-   OAUTH=$(gh issue create --body "Parent: #$EPIC" ...)
-   EMAIL=$(gh issue create --body "Parent: #$EPIC" ...)
-
    # Create branches
    git checkout -b "$EPIC-feature/auth-base"
-   git checkout -b "$OAUTH-feature/oauth"
-   git checkout -b "$EMAIL-feature/email"
-
-   # Update checklist
-   syncSubissueStates "$PWD" $EPIC
    ```
 
 3. **Report:**
    - Epic created: #42
-   - Subissues created: #43 (OAuth), #44 (Email)
-   - Branches created: `42-feature/auth-base`, `43-feature/oauth`, `44-feature/email`
+   - Branch created: `42-feature/auth-base`
    - Next steps: Implement features, create PRs
 
 ## When NOT to Use This Agent
