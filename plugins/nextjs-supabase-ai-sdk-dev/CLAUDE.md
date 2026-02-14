@@ -19,9 +19,8 @@ Local dev environment setup for Vercel/Supabase and systematic UI development wi
 
 | Hook | Event | Blocking | Purpose |
 |------|-------|----------|---------|
-| install-vercel | SessionStart | No | Installs Vercel CLI |
+| link-vercel-apps | SessionStart | No | Auto-links monorepo apps to Vercel projects and pulls env vars |
 | install-start-supabase-next | SessionStart | No | Sets up Supabase local dev, installs dependencies (skips if fresh), starts dev servers (Next.js, Cloudflare, Elysia, Turborepo) with health checks |
-| cache-supabase-schema | SessionStart | No | Caches Supabase table/column metadata for context matching |
 | run-file-eslint | PostToolUse[Write\|Edit] | Yes | Runs ESLint on edited files |
 | run-file-vitests | PostToolUse[Write\|Edit] | No | Runs related tests (warns only) |
 | move-playwright-screenshots | PostToolUse[browser_eval] | No | Moves screenshots to .claude/screenshots/ to prevent permission prompts |

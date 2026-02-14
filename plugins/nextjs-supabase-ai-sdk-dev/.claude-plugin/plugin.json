@@ -7,23 +7,5 @@
   },
   "repository": "https://github.com/constellos/claude-code",
   "license": "MIT",
-  "keywords": ["nextjs", "supabase", "ai-sdk", "development"],
-  "mcpServers": {
-    "nodes": {
-      "command": "npx",
-      "args": ["-y", "nodes-md@latest"]
-    },
-    "ai-elements": {
-      "command": "npx",
-      "args": ["-y", "mcp-remote@latest", "https://registry.ai-sdk.dev/api/mcp"]
-    },
-    "supabase": {
-      "command": "npx",
-      "args": ["-y", "mcp-remote@latest", "https://mcp.supabase.com/mcp"]
-    },
-    "vercel": {
-      "command": "npx",
-      "args": ["-y", "mcp-remote@latest", "https://mcp.vercel.com"]
-    }
-  }
+  "keywords": ["nextjs", "supabase", "ai-sdk", "development"]
 }
