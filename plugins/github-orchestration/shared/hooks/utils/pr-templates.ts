@@ -221,30 +221,6 @@ ${commits.map((msg) => `- ${msg.replace(/^(feat|fix|chore|docs|refactor):\s*/i, 
 }
 
 /**
- * Add stacked PR context to description
- *
- * @param description - Existing PR description
- * @param stackInfo - Stack information (base PR, dependent PRs)
- * @returns Updated description with stack context
- */
-export function addStackContext(
-  description: string,
-  stackInfo: { base?: number; dependents?: number[] }
-): string {
-  let stackSection = '\n\n## Stacked PR';
-
-  if (stackInfo.base) {
-    stackSection += `\n\n**Base PR:** #${stackInfo.base}`;
-  }
-
-  if (stackInfo.dependents && stackInfo.dependents.length > 0) {
-    stackSection += `\n\n**Dependent PRs:**\n${stackInfo.dependents.map((pr) => `- #${pr}`).join('\n')}`;
-  }
-
-  return description + stackSection;
-}
-
-/**
  * Extract conventional commit type from commit message
  *
  * @param commitMessage - The commit message

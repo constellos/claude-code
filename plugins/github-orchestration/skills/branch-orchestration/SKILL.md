@@ -349,31 +349,6 @@ for branch in $MERGED; do
 done
 ```
 
-### Example 5: Create Stacked Branches
-
-```bash
-# Create base feature branch
-BASE_ISSUE=42
-BASE_BRANCH=$(generateBranchName $BASE_ISSUE "feature" "Authentication System")
-git checkout -b "$BASE_BRANCH"
-
-# Create child branches for subissues
-SUBISSUES=(43 44 45)
-SUBTITLES=("OAuth Integration" "Email Auth" "Password Reset")
-
-for i in "${!SUBISSUES[@]}"; do
-  ISSUE_NUM=${SUBISSUES[$i]}
-  TITLE=${SUBTITLES[$i]}
-
-  # Create branch from base
-  CHILD_BRANCH=$(generateBranchName $ISSUE_NUM "feature" "$TITLE")
-  git checkout -b "$CHILD_BRANCH" "$BASE_BRANCH"
-  git push -u origin "$CHILD_BRANCH"
-
-  echo "Created stacked branch: $CHILD_BRANCH (base: $BASE_BRANCH)"
-done
-```
-
 ## Best Practices
 
 1. **Follow naming convention** - Always use `{issueNum}-{workType}/{kebab-name}`

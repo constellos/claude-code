@@ -183,7 +183,6 @@ export {
   getTaskTemplate,
   renderTemplate,
   getMinimalIssueBody,
-  createSubissueBody,
   addBranchReference,
   type TemplateVars,
 } from './issue-templates.js';
@@ -202,44 +201,9 @@ export {
   getPRTemplateByWorkType,
   renderPRTemplate,
   generatePRDescription,
-  addStackContext,
   extractCommitType,
   groupCommitsByType,
   formatGroupedCommits,
   type PRTemplateVars,
 } from './pr-templates.js';
 
-// ============================================================================
-// PR Stack Management
-// ============================================================================
-// Manage stacked PR dependencies and visualization.
-
-export {
-  savePRStack,
-  loadPRStack,
-  addPRToStack,
-  removePRFromStack,
-  visualizeStack,
-  validateStackOrder,
-  getMergeOrder,
-  findDependentPRs,
-  type PRStackNode,
-  type PRStack,
-  type StackValidationError,
-} from './pr-stack.js';
-
-// ============================================================================
-// Subissue Checklist Management
-// ============================================================================
-// Generate and update subissue checklists in parent issue bodies.
-
-export {
-  generateChecklistMarkdown,
-  extractChecklistSection,
-  parseChecklistItems,
-  updateParentIssueChecklist,
-  addSubissueToChecklist,
-  markSubissueComplete,
-  syncSubissueStates,
-  type SubissueInfo,
-} from './subissue-checklist.js';

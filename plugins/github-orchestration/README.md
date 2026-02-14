@@ -4,11 +4,11 @@
 
 # GitHub Orchestration Plugin
 
-> Comprehensive GitHub workflow orchestration with skills for issues, branches, PRs, subissues, stacked PRs, and CI management
+> Comprehensive GitHub workflow orchestration with skills for issues, branches, PRs, and CI management
 
 ## Purpose
 
-Provides complete GitHub workflow automation for Claude Code sessions. Combines automatic hooks for session context with 6 specialized skills and a coordinating agent for complex multi-step workflows. Supports issue management, smart branch naming, hierarchical subissues, stacked PRs, CI orchestration, and PR lifecycle automation.
+Provides complete GitHub workflow automation for Claude Code sessions. Combines automatic hooks for session context with 4 specialized skills and a coordinating agent for complex multi-step workflows. Supports issue management, smart branch naming, CI orchestration, and PR lifecycle automation.
 
 ## Contents
 
@@ -20,11 +20,8 @@ Provides complete GitHub workflow automation for Claude Code sessions. Combines 
 | add-github-context | SessionStart | Displays linked issue, branch sync status, outstanding issues |
 | create-issue-on-prompt | UserPromptSubmit | Creates GitHub issue on first user prompt |
 | sync-plan-to-issue | PostToolUse[Write\|Edit] | Creates/updates GitHub issues from plan files |
-| sync-task-to-subissue | PostToolUse[Task] | Creates GitHub subissues from Task prompts |
 | enhance-commit-context | PostToolUse[Bash] | Enriches git commits with task context |
 | await-pr-status | PostToolUse[Bash] | Waits for CI after `gh pr create` |
-| create-subagent-branch | SubagentStart | Creates isolated branch for stacked PR workflow |
-| stacked-pr-subagent-stop | SubagentStop | Handles stacked PR: push, create PR, auto-merge |
 | commit-task-await-ci-status | SubagentStop | Auto-commits subagent work, waits for CI |
 | commit-session-await-ci-status | Stop | Auto-commits session, reports CI status (blocking) |
 
@@ -34,8 +31,6 @@ Provides complete GitHub workflow automation for Claude Code sessions. Combines 
 |-------|---------|
 | issue-management | Create, update, label, and link GitHub issues with templates |
 | branch-orchestration | Smart branch naming (`{issue}-{type}/{name}`), lifecycle management |
-| subissue-orchestration | Hierarchical issues with parent linking and auto-updated checklists |
-| stacked-pr-management | Create and manage dependent PR chains for large features |
 | ci-orchestration | CI/CD monitoring with fail-fast patterns and preview URL extraction |
 | pr-workflow | PR lifecycle with auto-generated descriptions from commits |
 
@@ -68,75 +63,6 @@ git checkout -b "$BRANCH"
 git push -u origin "$BRANCH"
 ```
 
-### Create Epic with Subissues
-
-```bash
-# Using subissue-orchestration skill
-PARENT=$(gh issue create --title "Authentication System" --label "epic" ...)
-
-# Create subissues
-for task in "OAuth" "Email auth" "Password reset"; do
-  gh issue create --body "**Parent Issue:** #$PARENT" --title "$task"
-done
-
-# Auto-update checklist
-syncSubissueStates "$PWD" $PARENT
-```
-
-### Stacked PRs
-
-```bash
-# Using stacked-pr-management skill
-# Create PR chain: main → base → middleware → ui
-gh pr create --base main --head 42-feature/base
-gh pr create --base 42-feature/base --head 43-feature/middleware
-gh pr create --base 43-feature/middleware --head 44-feature/ui
-
-# Visualize stack
-visualizeStack "$(loadPRStack "$PWD")"
-```
-
-### Automated Subagent Stacked PR Workflow
-
-When enabled, subagents automatically work on isolated branches with auto-PR creation:
-
-```
-Main Session (on main branch)
-├── Subagent spawned → isolated branch created
-├── Subagent makes edits locally
-├── SubagentStop → push, create PR, auto-merge
-├── Local changes REVERTED (main stays clean)
-├── CI passes → auto-merge completes
-└── Main agent pulls merged changes and continues
-```
-
-**Enable the workflow:**
-
-```bash
-# Option 1: Environment variable
-export CLAUDE_STACKED_PR=true
-
-# Option 2: Session config (.claude/logs/session-config.json)
-{
-  "stackedPrMode": true,
-  "stackedPrConfig": {
-    "waitForCI": true,
-    "waitForMerge": true
-  }
-}
-
-# Option 3: Auto-detect (Phase 2)
-# Automatically enabled when current branch has an open PR
-```
-
-**Benefits:**
-- Main session stays on clean main branch
-- Subagent work is isolated in separate PRs
-- CI validates each piece independently
-- Failed subagent work doesn't pollute main session
-
-**Skipped agent types:** Explore, Plan (read-only agents)
-
 ### CI Monitoring
 
 ```bash
@@ -163,12 +89,11 @@ gh pr create --body "$DESC"
 
 ```bash
 # Using github-orchestrator agent
-# 1. Create epic with subissues
-# 2. Create branches for each subissue
-# 3. Track progress with checklists
-# 4. Create PRs with auto-descriptions
-# 5. Monitor CI and extract previews
-# 6. Merge and close issues
+# 1. Create epic issue
+# 2. Create branches with smart naming
+# 3. Create PRs with auto-descriptions
+# 4. Monitor CI and extract previews
+# 5. Merge and close issues
 ```
 
 ## State Files
@@ -177,10 +102,7 @@ The plugin maintains workflow state in `.claude/logs/`:
 
 - `plan-issues.json` - Plan → Issue mapping
 - `branch-issues.json` - Branch → Issue mapping
-- `task-subissues.json` - Task → Subissue mapping
-- `pr-stack.json` - PR dependency chains
-- `stacked-branches.json` - Subagent branch isolation state
-- `session-config.json` - Session configuration (including stacked PR mode)
+- `session-config.json` - Session configuration
 - `session-stops.json` - Session stop state tracking
 - `task-calls.json` - Task tool context coordination
 
@@ -206,11 +128,9 @@ claude plugin install github-orchestration@constellos
 This plugin replaces `github-context` with expanded capabilities. All existing hooks remain unchanged. New skills and agent provide explicit control over workflows.
 
 **What's New in v0.2.0:**
-- 6 specialized skills for explicit GitHub operations
+- 4 specialized skills for explicit GitHub operations
 - github-orchestrator agent for complex workflows
-- Extracted utilities (work-type-detector, branch-naming, issue-templates, pr-templates, pr-stack, subissue-checklist)
-- Support for stacked PRs
-- **Automated subagent stacked PR workflow** - Subagents work on isolated branches with auto-PR creation
+- Extracted utilities (work-type-detector, branch-naming, issue-templates, pr-templates)
 - Enhanced CI orchestration with preview URL extraction
 - Auto-generated PR descriptions from commits
 

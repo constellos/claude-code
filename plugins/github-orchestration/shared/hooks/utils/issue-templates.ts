@@ -73,18 +73,18 @@ export function getFeatureTemplate(): string {
 }
 
 /**
- * Get epic issue template with optional subissue list
+ * Get epic issue template with optional subtask list
  *
- * @param subissues - Optional array of subissue titles for checklist
+ * @param subtasks - Optional array of subtask titles for checklist
  * @returns Epic markdown template
  */
-export function getEpicTemplate(subissues?: string[]): string {
-  const checklistSection = subissues && subissues.length > 0
+export function getEpicTemplate(subtasks?: string[]): string {
+  const checklistSection = subtasks && subtasks.length > 0
     ? `
 
 ## Subtasks
 
-${subissues.map((title) => `- [ ] ${title}`).join('\n')}`
+${subtasks.map((title) => `- [ ] ${title}`).join('\n')}`
     : '';
 
   return `## Epic Overview
@@ -173,19 +173,6 @@ export function renderTemplate(template: string, vars: TemplateVars): string {
 export function getMinimalIssueBody(description: string, context?: string): string {
   const contextSection = context ? `\n\n## Additional Context\n\n${context}` : '';
   return `${description}${contextSection}`;
-}
-
-/**
- * Create issue body with parent issue reference
- *
- * @param parentIssueNumber - The parent issue number
- * @param description - Issue description
- * @returns Issue body with parent reference
- */
-export function createSubissueBody(parentIssueNumber: number, description: string): string {
-  return `**Parent Issue:** #${parentIssueNumber}
-
-${description}`;
 }
 
 /**
