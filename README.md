@@ -416,7 +416,7 @@ Add to your `~/.bashrc` or `~/.zshrc`:
 
 ```bash
 # Claude Worktree launcher with tab completion
-source ~/constellos/claude-code-plugins/claude-worktree.sh
+source ~/constellos/claude-code/claude-worktree.sh
 ```
 
 Then reload your shell:
@@ -439,7 +439,7 @@ cw nodes-md
 
 # Jump to a repo by owner/name
 cw celestian-dev/lazyjobs
-cw constellos/claude-code-plugins
+cw constellos/claude-code
 
 # Pass CLI flags to Claude
 cw --verbose

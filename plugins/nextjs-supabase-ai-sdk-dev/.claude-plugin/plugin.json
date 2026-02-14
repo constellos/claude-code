@@ -5,7 +5,7 @@
   "author": {
     "name": "constellos"
   },
-  "repository": "https://github.com/constellos/claude-code-plugins",
+  "repository": "https://github.com/constellos/claude-code",
   "license": "MIT",
   "keywords": ["nextjs", "supabase", "ai-sdk", "development"],
   "mcpServers": {

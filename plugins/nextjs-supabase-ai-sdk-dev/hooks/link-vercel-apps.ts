@@ -164,6 +164,18 @@ function detectTurborepoWorkspaces(cwd: string): string[] | null {
 }
 
 /**
+ * Check if an app directory is a Cloudflare Workers project
+ * (has wrangler.toml, wrangler.json, or wrangler.jsonc)
+ */
+function isCloudflareProject(appPath: string): boolean {
+  return (
+    existsSync(join(appPath, 'wrangler.toml')) ||
+    existsSync(join(appPath, 'wrangler.json')) ||
+    existsSync(join(appPath, 'wrangler.jsonc'))
+  );
+}
+
+/**
  * Try to find a matching Vercel project for an app
  * Uses the app directory name as the project name guess
  */
@@ -277,6 +289,13 @@ async function handler(input: SessionStartInput): Promise<SessionStartHookOutput
     for (const workspace of workspaces) {
       const appPath = join(input.cwd, workspace);
       const appName = basename(workspace);
+
+      // Skip Cloudflare Workers projects (they have wrangler config files)
+      if (isCloudflareProject(appPath)) {
+        messages.push(`  ⏭ ${appName} is a Cloudflare project, skipping`);
+        skippedCount++;
+        continue;
+      }
 
       // Check if already linked
       const existingLink = isVercelLinked(appPath);
