@@ -66,8 +66,6 @@ EOF
 **Utilities:**
 - `renderTemplate(template, vars)` - Substitute {{varName}} placeholders
 - `getMinimalIssueBody(description, context?)` - Basic issue without template
-- `createSubissueBody(parentNumber, description)` - Issue with parent reference
-
 ### Issue Updates
 
 Update issue metadata after creation:
@@ -91,10 +89,10 @@ gh issue edit 42 --body-file updated-description.md
 Link issues with parent-child or related relationships:
 
 ```bash
-# Parent-child (in subissue body)
+# Parent-child (in issue body)
 **Parent Issue:** #42
 
-This subissue implements the authentication flow from the parent epic.
+This issue implements the authentication flow from the parent epic.
 
 # Related issues (in body)
 **Related Issues:** #40, #41, #43
@@ -145,12 +143,10 @@ This skill complements the automatic hooks:
 |------|-------------------|------------------|
 | create-issue-on-prompt | Creates issue on first prompt | Create multiple issues, use specific templates |
 | sync-plan-to-issue | Syncs plan files to issues | Manually update issue from plan changes |
-| sync-task-to-subissue | Creates subissues from Task prompts | Bulk create subissues, custom subissue structure |
 
 **State Files:**
 - `.claude/logs/plan-issues.json` - Plan → Issue mapping
 - `.claude/logs/branch-issues.json` - Branch → Issue mapping
-- `.claude/logs/task-subissues.json` - Task → Subissue mapping
 
 ## Work Type Detection
 
@@ -213,10 +209,10 @@ gh issue create \
   --body "$TEMPLATE" # (after variable substitution)
 ```
 
-### Example 2: Create Epic with Subissues
+### Example 2: Create Epic Issue
 
 ```bash
-# Create parent epic
+# Create epic issue with task checklist
 PARENT=$(gh issue create \
   --title "Implement authentication system" \
   --label "epic" \
@@ -240,23 +236,13 @@ Build complete authentication system with OAuth and email/password support.
 
 ## Subtasks
 
-- [ ] #43 OAuth integration
-- [ ] #44 Email/password auth
-- [ ] #45 Password reset
-- [ ] #46 Session management
+- [ ] OAuth integration
+- [ ] Email/password auth
+- [ ] Password reset
+- [ ] Session management
 EOF
 )" \
   --json number -q .number)
-
-# Create subissues with parent reference
-for task in "OAuth integration" "Email/password auth" "Password reset" "Session management"; do
-  gh issue create \
-    --title "$task" \
-    --label "task" \
-    --body "**Parent Issue:** #$PARENT
-
-$task for authentication system"
-done
 ```
 
 ### Example 3: Update Issue Labels Based on Work Type
@@ -319,11 +305,10 @@ done
 ### Templates
 - `getBugTemplate()` - Bug report template
 - `getFeatureTemplate()` - Feature request template
-- `getEpicTemplate(subissues?)` - Epic with optional subtasks
+- `getEpicTemplate(subtasks?)` - Epic with optional subtasks
 - `getTaskTemplate()` - Simple task template
 - `renderTemplate(template, vars)` - Substitute variables
 - `getMinimalIssueBody(description, context?)` - Basic body
-- `createSubissueBody(parentNumber, description)` - Subissue with parent link
 - `addBranchReference(body, branchName)` - Add branch marker
 
 ### Work Type
@@ -333,7 +318,6 @@ done
 ### State Files
 - `.claude/logs/plan-issues.json` - Plan → Issue mapping
 - `.claude/logs/branch-issues.json` - Branch → Issue mapping
-- `.claude/logs/task-subissues.json` - Task → Subissue mapping
 
 ## Common Patterns
 
@@ -377,9 +361,9 @@ fi
 ```bash
 # Close all issues in epic when epic closes
 PARENT=42
-SUBISSUES=$(gh issue list --search "in:body \"Parent Issue: #$PARENT\"" --json number -q '.[].number')
+CHILD_ISSUES=$(gh issue list --search "in:body \"Parent Issue: #$PARENT\"" --json number -q '.[].number')
 
-for subissue in $SUBISSUES; do
-  gh issue close $subissue --comment "Closing as part of completed epic #$PARENT"
+for issue in $CHILD_ISSUES; do
+  gh issue close $issue --comment "Closing as part of completed epic #$PARENT"
 done
 ```

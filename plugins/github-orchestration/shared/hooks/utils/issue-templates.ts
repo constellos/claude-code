@@ -73,18 +73,18 @@ export function getFeatureTemplate(): string {
 }
 
 /**
- * Get epic issue template with optional subissue list
+ * Get epic issue template with optional subtask list
  *
- * @param subissues - Optional array of subissue titles for checklist
+ * @param subtasks - Optional array of subtask titles for checklist
  * @returns Epic markdown template
  */
-export function getEpicTemplate(subissues?: string[]): string {
-  const checklistSection = subissues && subissues.length > 0
+export function getEpicTemplate(subtasks?: string[]): string {
+  const checklistSection = subtasks && subtasks.length > 0
     ? `
 
 ## Subtasks
 
-${subissues.map((title) => `- [ ] ${title}`).join('\n')}`
+${subtasks.map((title) => `- [ ] ${title}`).join('\n')}`
     : '';
 
   return `## Epic Overview

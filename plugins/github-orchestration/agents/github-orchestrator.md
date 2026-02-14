@@ -208,9 +208,8 @@ Before destructive operations, verify:
 
 1. **Plan** (TodoWrite):
    - Create epic issue for authentication
-   - Create subissues for OAuth and email
-   - Create branches for each subissue
-   - Track implementation
+   - Create branches for implementation
+   - Track progress
    - Create and merge PRs
 
 2. **Execute:**
