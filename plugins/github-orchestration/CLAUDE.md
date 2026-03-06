@@ -27,8 +27,7 @@ Comprehensive GitHub workflow orchestration with skills for issues, branches, PR
 | enhance-commit-context | PostToolUse[Bash] | No | Enriches commits with context |
 | await-pr-status | PostToolUse[Bash] | No | Waits for CI after PR create |
 | post-explore-findings | SubagentStop | No | Posts Explore agent findings as comments |
-| commit-task-await-ci-status | SubagentStop | No | Auto-commits agent work |
-| commit-session-await-ci-status | Stop | Yes | Auto-commits, waits for CI |
+| commit-session-await-ci-status | Stop | Yes | Reports status, waits for CI |
 | close-issue-on-session-end | SessionEnd | No | Closes issue if session ends without PR |
 
 ## Skills

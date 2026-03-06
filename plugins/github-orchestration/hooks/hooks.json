@@ -7,12 +7,11 @@
     "Tracks issues created during sessions for cross-session discovery",
     "Surfaces related issues from previous sessions based on branch family",
     "Commit enhancement with issue context",
-    "Auto-commit for subagent work",
     "Plan-to-issue synchronization with versioned update comments",
     "Issue-to-plan synchronization (gh issue edit detection)",
     "Explore agent findings posted as issue comments",
     "Auto-waits for CI checks after PR creation (gh pr create)",
-    "Auto-commit and PR status check on session end"
+    "PR status check on session end"
   ],
   "description": "GitHub integration with branch context, commit review, and issue orchestration",
   "hooks": {
@@ -87,12 +86,6 @@
             "type": "command",
             "command": "npx tsx ${CLAUDE_PLUGIN_ROOT}/hooks/post-explore-findings.ts",
             "description": "Posts Explore agent findings as comments on linked GitHub issue"
-          },
-          {
-            "type": "command",
-            "command": "npx tsx ${CLAUDE_PLUGIN_ROOT}/hooks/commit-task-await-ci-status.ts",
-            "timeout": 900,
-            "description": "Auto-commits agent work with task context and waits for CI if triggered"
           }
         ]
       }
@@ -104,7 +97,7 @@
             "type": "command",
             "command": "npx tsx ${CLAUDE_PLUGIN_ROOT}/hooks/commit-session-await-ci-status.ts",
             "timeout": 900,
-            "description": "Auto-commits session changes, awaits CI checks, reports status with emoji table"
+            "description": "Reports uncommitted changes and PR/CI status on session stop"
           }
         ]
       }
