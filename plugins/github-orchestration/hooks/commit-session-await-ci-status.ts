@@ -1,5 +1,5 @@
 /**
- * Stop hook: PR status check and CI waiting
+ * Stop hook: Git state validation and PR status reporting
  *
  * This hook performs two main functions at session end:
  *
@@ -9,12 +9,10 @@
  *    - Claude settings validation
  *    - Hook file existence checks
  *
- * 2. **PR status reporting and CI waiting** - Provides PR visibility and ensures quality:
- *    - Checks for uncommitted changes (non-blocking message)
- *    - Checks if PR exists for current branch
- *    - **Waits for all CI checks to complete** (including Vercel, Supabase integrations)
- *    - **Blocks if any CI check fails** (10-minute timeout)
- *    - Extracts Vercel preview URLs (web and marketing apps)
+ * 2. **Status reporting** - Non-blocking informational messages:
+ *    - Checks for uncommitted changes
+ *    - Reports if PR exists for current branch
+ *    - Suggests checking CI status
  *
  * @module commit-session-await-status
  */
@@ -22,19 +20,6 @@
 import type { StopInput, StopHookOutput } from '../shared/types/types.js';
 import { createDebugLogger } from '../shared/hooks/utils/debug.js';
 import { runHook } from '../shared/hooks/utils/io.js';
-import {
-  saveOutputToLog,
-  formatCiChecksTable,
-} from '../shared/hooks/utils/log-file.js';
-import {
-  awaitCIWithFailFast,
-  getLatestCIRun as getCIRunDetails,
-  extractAllPreviews,
-  extractLinkedIssuesWithInfo,
-  type GroupedPreviewUrls,
-  type LinkedIssueInfo,
-} from '../shared/hooks/utils/ci-status.js';
-import { getSessionIssues, type IssueReference } from '../shared/hooks/utils/session-issues.js';
 import { addPRToState } from '../shared/hooks/utils/github-state.js';
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -345,98 +330,30 @@ async function validateHookFiles(cwd: string): Promise<{
 // Output Formatting
 // ============================================================================
 
-function formatLinkedIssue(issue: LinkedIssueInfo, prRepo: string): string {
-  const prefix = issue.repo === prRepo ? `#${issue.number}` : `${issue.repo}#${issue.number}`;
-  const titlePart = issue.title ? ` - ${issue.title}` : '';
-  return `${prefix}${titlePart} → ${issue.url}`;
-}
-
-function formatSessionIssue(issue: IssueReference, currentRepo: string): string {
-  const prefix = issue.repo === currentRepo ? `#${issue.number}` : `${issue.repo}#${issue.number}`;
-  const titlePart = issue.title ? ` - ${issue.title}` : '';
-  return `${prefix}${titlePart} → ${issue.url}`;
-}
-
-function formatPRStatusInfo(
-  prCheck: { prNumber: number; prUrl: string },
-  ciRun: { url?: string; status?: string; conclusion?: string; name?: string },
-  groupedPreviews: GroupedPreviewUrls,
-  linkedIssues: LinkedIssueInfo[],
-  otherIssues: IssueReference[],
-  prRepo: string
-): string {
-  const ciPassed = ciRun.conclusion === 'success';
-  const ciFailed = ciRun.conclusion === 'failure';
-
-  let message = `📋 PR #${prCheck.prNumber}: ${prCheck.prUrl}\n`;
-
-  if (ciRun.url) {
-    const statusIcon = ciPassed ? '✅' : ciFailed ? '❌' : '⏳';
-    message += `🔄 CI: ${ciRun.url} ${statusIcon} ${ciRun.conclusion || ciRun.status || 'pending'}\n`;
-  }
-
-  if (linkedIssues.length > 0) {
-    message += '\n   📌 Linked Issues (closes when merged):\n';
-    for (const issue of linkedIssues) {
-      message += `      • ${formatLinkedIssue(issue, prRepo)}\n`;
-    }
-  }
-
-  if (otherIssues.length > 0) {
-    message += '\n📝 Other Issues Created:\n';
-    for (const issue of otherIssues) {
-      message += `   • ${formatSessionIssue(issue, prRepo)}\n`;
-    }
-  }
-
-  if (groupedPreviews.vercel.length > 0) {
-    message += '\n🔼 Vercel Previews:\n';
-    for (const url of groupedPreviews.vercel) {
-      message += `   • ${url}\n`;
-    }
-  }
-
-  if (groupedPreviews.cloudflare.length > 0) {
-    message += '\n☁️ Cloudflare Deployments:\n';
-    for (const url of groupedPreviews.cloudflare) {
-      message += `   • ${url}\n`;
-    }
-  }
-
-  if (groupedPreviews.supabase.length > 0) {
-    message += '\n⚡ Supabase Preview Branches:\n';
-    for (const preview of groupedPreviews.supabase) {
-      message += `   • ${preview.dashboardUrl}\n`;
-    }
-  }
-
-  return message;
-}
-
 function formatConflictError(conflictedFiles: string[]): string {
   return [
-    '🚨 Merge Conflicts Detected:',
+    'Merge Conflicts Detected:',
     '',
-    `⚠️  ${conflictedFiles.length} file(s) have unresolved conflicts:`,
+    `${conflictedFiles.length} file(s) have unresolved conflicts:`,
     ...conflictedFiles.map(f => `  - ${f}`),
     '',
     'Please resolve these conflicts before ending the session:',
-    '  • Open conflicted files and resolve markers (<<<<<<, ======, >>>>>>)',
-    '  • Stage resolved files: git add <file>',
-    '  • Or use: git mergetool',
+    '  - Open conflicted files and resolve markers (<<<<<<, ======, >>>>>>)',
+    '  - Stage resolved files: git add <file>',
+    '  - Or use: git mergetool',
   ].join('\n');
 }
 
 function formatSyncError(syncCheck: { behindBy: number; aheadBy: number; remoteBranch: string }): string {
   return [
-    '🚨 Branch Out of Sync:',
+    'Branch Out of Sync:',
     '',
-    `⚠️  Your branch is ${syncCheck.behindBy} commit(s) behind ${syncCheck.remoteBranch}`,
+    `Your branch is ${syncCheck.behindBy} commit(s) behind ${syncCheck.remoteBranch}`,
     `  (You are ${syncCheck.aheadBy} commit(s) ahead)`,
     '',
     'Please sync your branch before ending the session:',
-    '  • Pull and merge: git pull',
-    '  • Or rebase: git pull --rebase',
+    '  - Pull and merge: git pull',
+    '  - Or rebase: git pull --rebase',
     '',
     'This prevents conflicts and ensures you\'re working with the latest code.',
   ].join('\n');
@@ -444,28 +361,28 @@ function formatSyncError(syncCheck: { behindBy: number; aheadBy: number; remoteB
 
 function formatDoctorErrors(issues: string[]): string {
   return [
-    '🚨 Claude Code Settings Issues Detected:',
+    'Claude Code Settings Issues Detected:',
     '',
-    ...issues.map(issue => `⚠️  ${issue}`),
+    ...issues.map(issue => `  ${issue}`),
     '',
     'Please fix these settings issues before ending the session:',
-    '  • Run: claude doctor',
-    '  • Review and fix reported issues',
-    '  • Check .claude/settings.json for configuration errors',
+    '  - Run: claude doctor',
+    '  - Review and fix reported issues',
+    '  - Check .claude/settings.json for configuration errors',
   ].join('\n');
 }
 
 function formatHookErrors(missingFiles: string[]): string {
   return [
-    '🚨 Missing Hook Files Detected:',
+    'Missing Hook Files Detected:',
     '',
-    `⚠️  ${missingFiles.length} hook file(s) are missing:`,
+    `${missingFiles.length} hook file(s) are missing:`,
     ...missingFiles.map(file => `  - ${file}`),
     '',
     'Please fix these hook issues before ending the session:',
-    '  • Reinstall affected plugins: claude plugin install <plugin-name>',
-    '  • Or remove broken plugins from .claude/settings.json',
-    '  • Check plugin cache: ~/.claude/plugins/cache/',
+    '  - Reinstall affected plugins: claude plugin install <plugin-name>',
+    '  - Or remove broken plugins from .claude/settings.json',
+    '  - Check plugin cache: ~/.claude/plugins/cache/',
   ].join('\n');
 }
 
@@ -530,15 +447,15 @@ async function handler(input: StopInput): Promise<StopHookOutput> {
       };
     }
 
-    // === PHASE 2: STATUS REPORTING ===
+    // === PHASE 2: STATUS REPORTING (non-blocking) ===
 
     const currentBranch = await getCurrentBranch(repoRoot);
     const messages: string[] = [];
 
-    // Check for uncommitted changes (non-blocking)
+    // Check for uncommitted changes
     const hasChanges = await hasUncommittedChanges(repoRoot);
     if (hasChanges) {
-      messages.push('⚠️ You have uncommitted changes. Consider committing before ending the session.');
+      messages.push('You have uncommitted changes. Consider committing before ending the session.');
     }
 
     // Skip PR checks for main branches
@@ -554,67 +471,6 @@ async function handler(input: StopInput): Promise<StopHookOutput> {
     const prCheck = await checkPRExists(currentBranch, repoRoot);
 
     if (prCheck.exists && prCheck.prNumber && prCheck.prUrl) {
-      // PR exists - wait for CI checks with fail-fast behavior
-      await logger.logOutput({
-        pr_exists: true,
-        pr_number: prCheck.prNumber,
-        waiting_for_ci: true,
-      });
-
-      const ciResult = await awaitCIWithFailFast({ prNumber: prCheck.prNumber }, repoRoot);
-
-      // If CI failed, block
-      if (!ciResult.success) {
-        const checksOutput = ciResult.checks.map(c => `${c.emoji} ${c.name}: ${c.status}`).join('\n');
-        const logPath = await saveOutputToLog(repoRoot, 'ci', `pr-${prCheck.prNumber}`, checksOutput);
-
-        const mappedChecks = ciResult.checks.map(c => ({
-          name: c.name,
-          status: (c.status === 'success' ? 'pass' :
-                   c.status === 'failure' ? 'fail' :
-                   c.status === 'cancelled' ? 'skipped' : 'pending') as 'pass' | 'fail' | 'pending' | 'skipped',
-          duration: '',
-        }));
-        const checksTable = formatCiChecksTable(mappedChecks, logPath);
-
-        await logger.logOutput({
-          ci_status: 'failed',
-          log_path: logPath,
-          ci_error: ciResult.error,
-          failed_check: ciResult.failedCheck,
-        });
-
-        return {
-          decision: 'block',
-          reason: `${ciResult.blockReason || `❌ CI failed for PR #${prCheck.prNumber}`}
-
-${checksTable}
-
-🔗 [View PR](${prCheck.prUrl})
-   \`gh pr checks ${prCheck.prNumber}\``,
-          systemMessage: 'Claude is blocked from stopping due to CI check failures.',
-        };
-      }
-
-      // CI passed - fetch details and show status
-      await logger.logOutput({ ci_status: 'passed', checks: ciResult.checks });
-
-      const [ciRun, groupedPreviews, linkedIssues, sessionIssues] = await Promise.all([
-        getCIRunDetails(prCheck.prNumber, repoRoot).then(r => r ?? {}),
-        extractAllPreviews(prCheck.prNumber, repoRoot),
-        extractLinkedIssuesWithInfo(prCheck.prNumber, repoRoot),
-        getSessionIssues(input.session_id, repoRoot),
-      ]);
-
-      const prRepoMatch = prCheck.prUrl.match(/github\.com\/([^/]+\/[^/]+)\/pull/);
-      const prRepo = prRepoMatch ? prRepoMatch[1] : '';
-
-      const linkedIssueKeys = new Set(linkedIssues.map(i => `${i.repo}#${i.number}`));
-      const otherIssues = sessionIssues.filter(
-        issue => !linkedIssueKeys.has(`${issue.repo}#${issue.number}`)
-      );
-
-      // Track PR in github.json
       await addPRToState(
         input.session_id,
         {
@@ -622,43 +478,15 @@ ${checksTable}
           url: prCheck.prUrl,
           title: '',
           createdAt: new Date().toISOString(),
-          linkedIssues: linkedIssues.map(i => i.number),
+          linkedIssues: [],
         },
         repoRoot
       );
 
-      // If CI run shows failure/cancelled, block
-      if (ciRun.conclusion === 'failure' || ciRun.conclusion === 'cancelled') {
-        const failedStatus = ciRun.conclusion === 'cancelled' ? 'cancelled' : 'failed';
-        return {
-          decision: 'block',
-          reason: `❌ CI ${failedStatus} for PR #${prCheck.prNumber}
-
-🔗 [View PR](${prCheck.prUrl})
-   [View CI Run](${ciRun.url})`,
-          systemMessage: `Claude is blocked from stopping due to CI ${failedStatus}.`,
-        };
-      }
-
-      const prStatusMessage = formatPRStatusInfo(
-        { prNumber: prCheck.prNumber, prUrl: prCheck.prUrl },
-        ciRun, groupedPreviews, linkedIssues, otherIssues, prRepo
-      );
-
-      if (messages.length > 0) {
-        messages.push('');
-        messages.push(prStatusMessage);
-      } else {
-        messages.push(prStatusMessage);
-      }
-
-      return {
-        decision: 'approve',
-        systemMessage: messages.join('\n'),
-      };
+      messages.push(`PR #${prCheck.prNumber} is open: ${prCheck.prUrl}`);
+      messages.push(`Check CI status: \`gh pr checks ${prCheck.prNumber}\``);
     }
 
-    // No PR - just approve (with any status messages)
     if (messages.length > 0) {
       return { decision: 'approve', systemMessage: messages.join('\n') };
     }
