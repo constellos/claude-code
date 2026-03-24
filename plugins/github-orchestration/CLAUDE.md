@@ -25,9 +25,9 @@ Comprehensive GitHub workflow orchestration with skills for issues, branches, PR
 | sync-plan-to-issue | PostToolUse[Write\|Edit] | No | Syncs plans to issues with version comments |
 | sync-issue-to-plan | PostToolUse[Bash] | No | Syncs gh issue edit back to plan file |
 | enhance-commit-context | PostToolUse[Bash] | No | Enriches commits with context |
-| await-pr-status | PostToolUse[Bash] | No | Waits for CI after PR create |
+| await-pr-status | PostToolUse[Bash] | No | Detects PR creation, suggests CI check |
 | post-explore-findings | SubagentStop | No | Posts Explore agent findings as comments |
-| commit-session-await-ci-status | Stop | Yes | Reports status, waits for CI |
+| commit-session-await-ci-status | Stop | Yes | Validates git state, reports PR status |
 | close-issue-on-session-end | SessionEnd | No | Closes issue if session ends without PR |
 
 ## Skills

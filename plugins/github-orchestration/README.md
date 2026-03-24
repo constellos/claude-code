@@ -21,9 +21,8 @@ Provides complete GitHub workflow automation for Claude Code sessions. Combines 
 | create-issue-on-prompt | UserPromptSubmit | Creates GitHub issue on first user prompt |
 | sync-plan-to-issue | PostToolUse[Write\|Edit] | Creates/updates GitHub issues from plan files |
 | enhance-commit-context | PostToolUse[Bash] | Enriches git commits with task context |
-| await-pr-status | PostToolUse[Bash] | Waits for CI after `gh pr create` |
-| commit-task-await-ci-status | SubagentStop | Auto-commits subagent work, waits for CI |
-| commit-session-await-ci-status | Stop | Auto-commits session, reports CI status (blocking) |
+| await-pr-status | PostToolUse[Bash] | Detects PR creation, suggests CI check |
+| commit-session-await-ci-status | Stop | Validates git state, reports PR status (blocking) |
 
 ### Skills
 

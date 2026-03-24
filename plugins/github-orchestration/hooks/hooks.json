@@ -10,8 +10,8 @@
     "Plan-to-issue synchronization with versioned update comments",
     "Issue-to-plan synchronization (gh issue edit detection)",
     "Explore agent findings posted as issue comments",
-    "Auto-waits for CI checks after PR creation (gh pr create)",
-    "PR status check on session end"
+    "Detects PR creation and suggests checking CI",
+    "Validates git state on session end"
   ],
   "description": "GitHub integration with branch context, commit review, and issue orchestration",
   "hooks": {
@@ -69,7 +69,7 @@
           {
             "type": "command",
             "command": "npx tsx ${CLAUDE_PLUGIN_ROOT}/hooks/await-pr-status.ts",
-            "description": "Waits for CI checks to complete after PR creation (gh pr create)"
+            "description": "Detects PR creation and suggests checking CI"
           },
           {
             "type": "command",
@@ -96,8 +96,8 @@
           {
             "type": "command",
             "command": "npx tsx ${CLAUDE_PLUGIN_ROOT}/hooks/commit-session-await-ci-status.ts",
-            "timeout": 900,
-            "description": "Reports uncommitted changes and PR/CI status on session stop"
+            "timeout": 120,
+            "description": "Validates git state and reports PR status on session stop"
           }
         ]
       }
