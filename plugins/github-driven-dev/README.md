@@ -119,7 +119,7 @@ Format: `{issueNumber}-{workType}/{kebab-case-title}`
 ## Installation
 
 ```bash
-claude plugin install github-orchestration@constellos
+claude plugin install github-driven-dev@constellos
 ```
 
 ## Migration from github-context

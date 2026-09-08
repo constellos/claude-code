@@ -20,7 +20,7 @@ folder:
 **When to use**:
 - Automatically enabled for all Claude Code sessions
 - No manual intervention required
-- Foundation for other plugins (github-orchestration, project-context)
+- Foundation for other plugins (github-driven-dev, project-context)
 - Debugging task execution with `DEBUG=task`
 
 ## Hook Summary
@@ -67,7 +67,7 @@ Creates `.claude/logs/task-calls.json` as a coordination mechanism:
 This state file enables:
 - PostToolUse hooks to retrieve context from PreToolUse
 - SubagentStop hooks to correlate file operations with task prompts
-- Other plugins (github-orchestration) to create GitHub subissues from tasks
+- Other plugins (github-driven-dev) to create GitHub subissues from tasks
 - Task analytics and debugging
 
 ### Plugin-Local Shared Utilities
@@ -157,7 +157,7 @@ This caused:
 
 ### Integration with Other Plugins
 
-**github-orchestration** reads task-calls.json to:
+**github-driven-dev** reads task-calls.json to:
 - Create GitHub subissues from Task prompts (sync-task-to-subissue.ts)
 - Enhance commits with task context (enhance-commit-context.ts)
 

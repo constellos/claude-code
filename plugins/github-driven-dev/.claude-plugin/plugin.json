@@ -1,5 +1,5 @@
 {
-  "name": "github-orchestration",
+  "name": "github-driven-dev",
   "version": "0.2.0",
   "description": "Comprehensive GitHub workflow orchestration with skills for issues, branches, PRs, and CI management",
   "author": {

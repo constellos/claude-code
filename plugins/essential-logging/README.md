@@ -10,7 +10,7 @@ Provides foundational task logging infrastructure that tracks Task tool executio
 - Automatic task context capture (agent type, prompt, timestamps)
 - Shared state coordination between hooks
 - Debug logging with `DEBUG=task` environment variable
-- Foundation for plugin ecosystem (github-orchestration, project-context depend on this)
+- Foundation for plugin ecosystem (github-driven-dev, project-context depend on this)
 
 ## Contents
 
@@ -39,7 +39,7 @@ Provides foundational task logging infrastructure that tracks Task tool executio
        └─→ loadTaskCallContext() → Log completion + metrics
                     ↓
 5. Other plugins can read task-calls.json
-   └─→ github-orchestration: Creates GitHub subissues
+   └─→ github-driven-dev: Creates GitHub subissues
    └─→ project-context: Runs tests for task edits
 ```
 
@@ -106,7 +106,7 @@ const edits = await getTaskEdits('/path/to/agent-transcript.jsonl');
 
 ## Integration with Other Plugins
 
-### github-orchestration
+### github-driven-dev
 
 Reads `task-calls.json` to:
 - **sync-task-to-subissue.ts** - Creates GitHub subissues from Task prompts (excludes Plan/Explore)
@@ -300,8 +300,8 @@ Essential-logging must be listed FIRST in marketplace.json:
       "source": "./plugins/essential-logging"
     },
     {
-      "name": "github-orchestration",
-      "source": "./plugins/github-orchestration"
+      "name": "github-driven-dev",
+      "source": "./plugins/github-driven-dev"
     }
   ]
 }
