@@ -30,13 +30,13 @@
       "strict": false
     },
     {
-      "name": "github-orchestration",
+      "name": "github-driven-dev",
       "description": "GitHub workflow orchestration with branch context, commit enhancement, and CI management",
       "version": "0.2.0",
       "author": {
         "name": "constellos"
       },
-      "source": "./plugins/github-orchestration",
+      "source": "./plugins/github-driven-dev",
       "strict": false
     },
     {

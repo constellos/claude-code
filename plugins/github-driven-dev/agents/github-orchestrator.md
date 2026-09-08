@@ -2,7 +2,7 @@
 description: Use this agent for complex multi-step GitHub workflows involving issues, PRs, branches, and CI coordination. Triggers on "orchestrate GitHub workflow", "automate PR process", "manage issue lifecycle", "full GitHub automation", or any task requiring coordination across multiple GitHub operations.
 model: sonnet
 tools: [Read, Write, Edit, Glob, Grep, Bash, TodoWrite]
-skills: [github-orchestration:issue-management, github-orchestration:branch-orchestration, github-orchestration:ci-orchestration, github-orchestration:pr-workflow]
+skills: [github-driven-dev:issue-management, github-driven-dev:branch-orchestration, github-driven-dev:ci-orchestration, github-driven-dev:pr-workflow]
 color: "#6E40C9"
 ---
 

@@ -48,7 +48,7 @@ Comprehensive GitHub workflow orchestration with skills for issues, branches, PR
 ## Installation
 
 ```bash
-claude plugin install github-orchestration@constellos
+claude plugin install github-driven-dev@constellos
 ```
 
 ## See Also

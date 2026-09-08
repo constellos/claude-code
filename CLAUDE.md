@@ -6,7 +6,7 @@ Plugin marketplace with shared TypeScript utilities for typed hooks.
 
 | Plugin | Purpose |
 |--------|---------|
-| [github-orchestration](./plugins/github-orchestration/) | GitHub workflow orchestration, branch context, CI |
+| [github-driven-dev](./plugins/github-driven-dev/) | GitHub workflow orchestration, branch context, CI |
 | [project-context](./plugins/project-context/) | CLAUDE.md discovery, validation |
 | [nextjs-supabase-ai-sdk-dev](./plugins/nextjs-supabase-ai-sdk-dev/) | Vercel/Supabase, UI dev system |
 
